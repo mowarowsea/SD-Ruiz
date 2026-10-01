@@ -3,8 +3,9 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers as lineNumbersExt, placeholder as placeholderExt, tooltips } from "@codemirror/view";
 import { useEffect, useRef } from "react";
-import { promptCompletion } from "../prompt/complete";
+import { isUsed, promptCompletion } from "../prompt/complete";
 import { promptHighlight } from "../prompt/highlight";
+import { promptStructure } from "../prompt/structure";
 
 const theme = EditorView.theme(
   {
@@ -16,6 +17,8 @@ const theme = EditorView.theme(
     ".cm-cursor": { borderLeftColor: "var(--color-accent)", borderLeftWidth: "2px" },
     ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--color-muted)", opacity: "0.55" },
     ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 0", minWidth: "2ch" },
+    // ${name=値} を畳んだときの …
+    ".cm-foldPlaceholder": { margin: "0 2px", padding: "0 6px", border: "1px solid var(--color-line)", borderRadius: "4px", backgroundColor: "var(--color-surface2)", color: "var(--color-accent)", cursor: "pointer" },
     ".cm-placeholder": { color: "var(--color-muted)", opacity: "0.6" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "rgba(201,155,171,0.3) !important" },
   },
@@ -59,7 +62,8 @@ export function PromptEditor({
           EditorView.contentAttributes.of({ autocapitalize: "off", autocorrect: "off", spellcheck: "false" }),
           placeholderExt(placeholder ?? ""),
           promptHighlight,
-          autocompletion({ override: [promptCompletion], icons: false, activateOnTypingDelay: 0, optionClass: (c) => `cm-opt-${c.type ?? ""}` }),
+          promptStructure,
+          autocompletion({ override: [promptCompletion], icons: false, activateOnTypingDelay: 0, optionClass: (c) => `cm-opt-${c.type ?? ""}${isUsed(c) ? " cm-opt-used" : ""}` }),
           // 補完の候補が入力欄の枠で切れないように body 直下に出す
           tooltips({ parent: document.body }),
           theme,

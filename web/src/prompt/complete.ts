@@ -35,6 +35,38 @@ export function invalidateWildcards() {
   wildcardsCache = null;
 }
 
+/** 比べるためにタグを正規化する (エスケープを外し、_ は空白、大文字小文字を無視) */
+const normalize = (s: string) => s.replace(/\\(.)/g, "$1").replace(/_/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * 同じ入力欄ですでに使っているもの。書きかけの部分 (from〜カーソル) は除く。
+ * タグは区切り (カンマ・括弧・| など) で分け、(tag:1.2) の重みは外して比べる
+ */
+function usedInDoc(ctx: CompletionContext, from: number) {
+  const doc = ctx.state.doc;
+  const text = doc.sliceString(0, from) + doc.sliceString(ctx.pos);
+  const lower = text.toLowerCase();
+  // エスケープした括弧 \( \) で切らないよう、いったん別の文字に逃がしてから区切る
+  const tags = new Set(
+    text
+      .replace(/<[^>\n]*>|__[\w\-/*.!]+?__/g, ",")
+      .replace(/\\\(/g, "\u0001")
+      .replace(/\\\)/g, "\u0002")
+      .split(/[,()[\]{}|\n]/)
+      .map((t) => normalize(t.replace(/:\s*-?[\d.]+\s*$/, "").replace(/\u0001/g, "(").replace(/\u0002/g, ")")))
+      .filter(Boolean),
+  );
+  return {
+    tag: (name: string) => tags.has(normalize(name)),
+    wildcard: (name: string) => lower.includes(`__${name.toLowerCase()}__`),
+    lora: (name: string) => new RegExp(`<lora:${escapeRe(name.toLowerCase())}(:|>)`).test(lower),
+  };
+}
+
+/** 候補が同じ入力欄ですでに使われているか (補完の一覧で印を付ける) */
+export const isUsed = (c: Completion) => !!(c as Completion & { used?: boolean }).used;
+
 /** 補完の後ろに区切りの ", " を付ける (すでに続いていれば付けない) */
 function withComma(view: { state: { doc: { sliceString(a: number, b: number): string } } }, to: number) {
   const next = view.state.doc.sliceString(to, to + 1);
@@ -46,13 +78,14 @@ async function wildcardSource(ctx: CompletionContext): Promise<CompletionResult 
   if (!m) return null;
   const q = m.text.slice(2).toLowerCase();
   const list = await wildcards().catch(() => []);
+  const used = usedInDoc(ctx, m.from);
   return {
     from: m.from,
     filter: false,
     options: list
       .filter((w) => w.toLowerCase().includes(q))
       .slice(0, 50)
-      .map((w) => ({ label: `__${w}__`, type: "wildcard", apply: `__${w}__` })),
+      .map((w) => ({ label: `__${w}__`, type: "wildcard", apply: `__${w}__`, used: used.wildcard(w) })),
   };
 }
 
@@ -61,13 +94,14 @@ async function loraSource(ctx: CompletionContext): Promise<CompletionResult | nu
   if (!m) return null;
   const q = m.text.replace(/^<(lora:)?/, "").toLowerCase();
   const list = await loras().catch(() => []);
+  const used = usedInDoc(ctx, m.from);
   return {
     from: m.from,
     filter: false,
     options: list
       .filter((l) => l.name.toLowerCase().includes(q) || l.folder.toLowerCase().includes(q))
       .slice(0, 50)
-      .map((l) => ({ label: l.name, detail: l.folder, type: "lora", apply: `<lora:${l.name}:1>` })),
+      .map((l) => ({ label: l.name, detail: l.folder, type: "lora", apply: `<lora:${l.name}:1>`, used: used.lora(l.name) })),
   };
 }
 
@@ -85,14 +119,16 @@ async function tagSource(ctx: CompletionContext): Promise<CompletionResult | nul
   if (ctx.aborted) return null;
   const { tags } = await api.tags(m.text).catch(() => ({ tags: [] }));
   if (ctx.aborted || !tags.length) return null;
+  const used = usedInDoc(ctx, m.from);
   return {
     from: m.from,
     filter: false,
     options: tags.map(
-      (t): Completion => ({
+      (t): Completion & { used: boolean } => ({
         label: tagToPrompt(t.name),
         detail: [t.alias && `← ${t.alias}`, t.translation, formatCount(t.count)].filter(Boolean).join("  "),
         type: `tag-${t.category}`,
+        used: used.tag(t.name),
         apply: (view, _c, from, to) => {
           const insert = tagToPrompt(t.name) + withComma(view, to);
           view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });

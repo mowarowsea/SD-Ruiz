@@ -41,7 +41,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
 - txt2img のみ (img2img / inpaint / ControlNet / ADetailer / Hires fix は対象外)
 - 画面: 下部ナビに 生成 / ギャラリー / Extras。Extras はたまに使うおまけ機能 (ギャラリー整理 / ワイルドカード / Forge 起動・診断) で、タップすると Extras ボタンのすぐ上に小さなメニューが出る (メニュー専用のページは作らない)。機能はここに増やしていく。メニューは名前だけで説明文は付けない (準備中のものだけ「準備中」と出す)
 - 説明文は見出しの (i) を押したときだけ出す (どの画面も同じ)
-- 文字: ロゴ (「Ruiz」のみ) だけ Serif (DM Serif Display)。それ以外は DryEyes と同じ OS 標準のゴシック (-apple-system / Segoe UI など。日本語は OS の既定)。プロンプト・ファイル名・ログ・数値は等幅 (JetBrains Mono)。アイコンは Font Awesome
+- 文字: ロゴ (「SD-Ruiz」のみ) だけ Serif (DM Serif Display)。それ以外は DryEyes と同じ OS 標準のゴシック (-apple-system / Segoe UI など。日本語は OS の既定)。プロンプト・ファイル名・ログ・数値は等幅 (JetBrains Mono)。アイコンは Font Awesome
 - デザイン: Atelier (暖色寄りのダーク + セリフ体の見出し)、アクセントは彩度を落としたローズ `#c99bab` (`mockups/index.html`)
 - 生成画面: Prompt と Negative は常に表示 (Negative もよく使う)。Params (サイズ / Steps / CFG / Sampler / Scheduler / Seed / Batch) はほとんど変えないのでアコーディオンで畳む
 - 数値は基本的に手打ちで入力する (スライダーは使わない)
@@ -55,16 +55,20 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - Dynamic Prompts: `{a|b|c}` `{2$$a|b}` `__wildcard__`
   - `BREAK` / `AND`、`\(` などのエスケープ
   - コメント: Forge の "Remove Comments from Prompts" と同じ `#` `//` `/* */`
+- キャレットの隣の括弧と、対応する括弧を枠で強調する (`(` などエスケープしたものは括弧として数えない)
+- Dynamic Prompts の変数定義 `${name=値}` は値を折りたためる。定義の頭の ▾ で畳み、`${name=…}` の … をタップで開く (表示だけで、文字は変わらない)
 - 入力補完 (tagcomplete の設定に合わせた挙動)
   - タグ: `tags/danbooru.csv` を BFF がメモリに読み、前方一致 → 別名 → 部分一致を件数順に返す。カテゴリで色分け
   - 確定時はアンダースコアを空白に、括弧をエスケープし、後ろに `, ` を付ける
   - `__` でワイルドカード、`<` でLoRA を補完 (`<lora:name:1>` を挿入)
+  - 同じ入力欄ですでに使っているタグ・ワイルドカード・LoRA は候補に ✓ を付ける (Prompt と Negative は別々に数える。タグは重みや `_` / 空白の違いを無視して比べる)
 - 簡易翻訳
   - タグ単位: 辞書による即時表示 (オフライン)。`config.json` の `translationFile` に `tag,訳` 形式の CSV を置くと補完候補に訳が出る (エディタ内の表示はステップ 6)
   - 文章単位: ローカル LLM (OmniRoute / Ollama 経由) をオンデマンドで呼ぶ
 
 ### 3.3 Checkpoint 選択
 - プレビュー画像つきのカードを 2 列で並べるボトムシート。検索と、すべて / お気に入り / 最近 / フォルダ での絞り込み
+- 並びは新しい順 (ファイルの更新日時の降順) が既定で、名前順に切り替えられる (LoRA も同じ。選んだ並びは端末ごとに覚える)
 - プレビュー画像はモデルの横にある `*.preview.png` などを BFF が縮小 (sharp, 384px webp) して返す。縮小版は `cache/thumbs/` にキャッシュ
 - ベースモデルのバッジ (IL / Pony / XL / 1.5 / Flux ...)。StabilityMatrix の `cm-info.json` か Civitai Helper の `civitai.info` から読み、無ければ safetensors のヘッダから推定する
 - お気に入り (☆)、最近使ったもの (生成したモデルの新しい順 8 件)
@@ -78,7 +82,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
 
 ### 3.4.1 ワイルドカード編集 (Extras)
 - Dynamic Prompts の wildcards ディレクトリ (`<forgeDir>/extensions/sd-dynamic-prompts/wildcards`、フォルダ階層あり) の .txt を一覧・編集・新規作成・名前変更・削除
-  - 一覧はフォルダごとにまとめ、候補の数 (コメントと空行を除いた行数) を出す。名前で絞り込める
+  - 一覧はフォルダごとのアコーディオン (ルートは `/`)。開いているフォルダは端末ごとに覚え、名前で絞り込んでいる間は全部開く。ファイルごとに候補の数 (コメントと空行を除いた行数) を出す
   - 新規作成と名前変更は `chara/fate` のように / でフォルダを指定する (フォルダは自動で作り、空になったら消す)
   - 削除はゴミ箱フォルダの `wildcards/` へ移す
 - 編集欄は生成画面のプロンプトと同じ (シンタックスハイライトとタグ / ワイルドカード / LoRA の補完) に行番号を付けたもの。1 行が 1 つの候補

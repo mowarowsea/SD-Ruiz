@@ -111,7 +111,7 @@ server.get("/api/meta", async () => {
     current,
     models: models.map((m) => {
       const sc = sidecars.get(m.filename);
-      return { title: m.title, name: m.model_name, base: sc.base, preview: !!sc.preview };
+      return { title: m.title, name: m.model_name, base: sc.base, preview: !!sc.preview, mtime: sc.mtime };
     }),
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
@@ -158,7 +158,7 @@ server.get("/api/loras", async () => {
       .map((l) => {
         const rel = l.path.split(root).pop() ?? l.name;
         const sc = sidecars.get(l.path);
-        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/"), base: sc.base, trainedWords: sc.trainedWords, preview: !!sc.preview };
+        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/"), base: sc.base, trainedWords: sc.trainedWords, preview: !!sc.preview, mtime: sc.mtime };
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
   };

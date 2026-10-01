@@ -38,15 +38,32 @@ export interface Emphasis {
   weight: number;
 }
 
+/** 対応する括弧の組 (open / close はそれぞれの括弧の位置) */
+export interface BracketPair {
+  open: number;
+  close: number;
+}
+
+/** Dynamic Prompts の変数の定義 ${name=値}。from は "$" の位置、valueFrom は値の先頭、to は閉じ括弧 "}" の位置 */
+export interface VariableDef {
+  from: number;
+  valueFrom: number;
+  to: number;
+}
+
 export interface ParseResult {
   spans: Span[];
   emphasis: Emphasis[];
+  pairs: BracketPair[];
+  variables: VariableDef[];
 }
 
 interface Frame {
   char: "(" | "[" | "{";
   pos: number;
   depth: number;
+  /** ${name=...} のとき、"$" の位置と値の先頭 */
+  variable?: { from: number; valueFrom: number };
 }
 
 const closer = { ")": "(", "]": "[", "}": "{" } as const;
@@ -59,6 +76,8 @@ export function parsePrompt(text: string): ParseResult {
   const spans: Span[] = [];
   const emphasis: Emphasis[] = [];
   const stack: Frame[] = [];
+  const pairs: BracketPair[] = [];
+  const variables: VariableDef[] = [];
   const at = (re: RegExp, i: number) => {
     re.lastIndex = i;
     return re.exec(text);
@@ -132,7 +151,7 @@ export function parsePrompt(text: string): ParseResult {
       const m = /^\$\{[\w-]+(=!?)?/.exec(text.slice(i, i + 80));
       if (m) {
         spans.push({ from: i, to: i + m[0].length, kind: "variable" });
-        stack.push({ char: "{", pos: i + 1, depth: stack.length });
+        stack.push({ char: "{", pos: i + 1, depth: stack.length, variable: m[1] ? { from: i, valueFrom: i + m[0].length } : undefined });
         i += m[0].length;
         continue;
       }
@@ -168,6 +187,8 @@ export function parsePrompt(text: string): ParseResult {
         continue;
       }
       stack.pop();
+      pairs.push({ open: top.pos, close: i });
+      if (top.variable) variables.push({ ...top.variable, to: i });
       spans.push({ from: i, to: i + 1, kind: "bracket", depth: top.depth });
       if (c === ")") {
         // (tag:1.2) の重み
@@ -193,7 +214,7 @@ export function parsePrompt(text: string): ParseResult {
     if (s) s.kind = "error";
   }
 
-  return { spans: spans.sort((a, b) => a.from - b.from), emphasis: flattenEmphasis(emphasis, text.length) };
+  return { spans: spans.sort((a, b) => a.from - b.from), emphasis: flattenEmphasis(emphasis, text.length), pairs, variables };
 }
 
 /** 入れ子の強調の倍率を掛け合わせ、重ならない区間に分けて返す (倍率 1 の区間は含めない) */

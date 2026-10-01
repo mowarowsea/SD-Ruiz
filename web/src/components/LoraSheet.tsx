@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { baseLabel, type Lora, loadLoras, type Prefs } from "../api";
 import { Sheet } from "./Sheet";
-import { BaseBadge, FilterChips, Star, Thumb } from "./Thumb";
+import { usePersistentState } from "../hooks";
+import { BaseBadge, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
 
 type Filter = "all" | "fav" | "used" | `folder:${string}`;
 
@@ -26,6 +27,7 @@ export function LoraSheet({
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = usePersistentState("ruiz.sort.lora", { by: "mtime" as SortBy });
   const favs = new Set(prefs?.favoriteLoras ?? []);
 
   useEffect(() => {
@@ -41,15 +43,19 @@ export function LoraSheet({
   ];
 
   const q = query.toLowerCase();
-  const shown = (loras ?? []).filter(
+  const filtered = (loras ?? []).filter(
     (l) =>
       (l.name.toLowerCase().includes(q) || l.alias.toLowerCase().includes(q) || l.trainedWords.some((w) => w.toLowerCase().includes(q))) &&
       (filter === "all" || (filter === "fav" && favs.has(l.name)) || (filter === "used" && used.has(l.name)) || (filter.startsWith("folder:") && l.folder === filter.slice(7))),
   );
+  const shown = sortItems(filtered, sort.by, (l) => l.name);
 
   return (
     <Sheet open={open} onClose={onClose} title="LoRA" aside={loras ? `${loras.length} LoRA` : undefined}>
-      <input className="field w-full text-sm" placeholder="🔍 名前・トリガーワードで検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="flex gap-2">
+        <input className="field min-w-0 flex-1 text-sm" placeholder="🔍 名前・トリガーワードで検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <SortButton value={sort.by} onChange={(by) => setSort({ by })} />
+      </div>
       <FilterChips items={chips} value={filter} onChange={setFilter} />
       {error && <p className="py-4 text-sm text-danger">{error}</p>}
       {!loras && !error && <p className="py-8 text-center text-sm text-muted">読み込み中…</p>}

@@ -166,3 +166,39 @@ input[type="number"]::-webkit-outer-spin-button {
   color: #c7a4e3;
   font-weight: 600;
 }
+
+/* 同じ入力欄ですでに使っている候補 */
+.cm-opt-used .cm-completionLabel::before {
+  content: "✓";
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.5;
+  vertical-align: 1px;
+  color: var(--color-accent-ink);
+  background: var(--color-accent);
+}
+.cm-opt-used {
+  opacity: 0.7;
+}
+
+/* キャレットの隣の括弧と、対応する括弧 */
+.pt-match {
+  outline: 1px solid var(--color-accent);
+  border-radius: 2px;
+  background: rgba(201, 155, 171, 0.25);
+}
+
+/* ${name=値} の折りたたみ */
+.pt-fold {
+  display: inline-block;
+  width: 1.1em;
+  margin-right: 1px;
+  text-align: center;
+  color: var(--color-muted);
+  cursor: pointer;
+  user-select: none;
+}
+

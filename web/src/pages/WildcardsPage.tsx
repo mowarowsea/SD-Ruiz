@@ -1,8 +1,9 @@
-import { faArrowLeft, faEllipsis, faMagnifyingGlass, faPlus } from "@fortawesome/free-solid-svg-icons";
+import { faArrowLeft, faChevronRight, faEllipsis, faMagnifyingGlass, faPlus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { api, type WildcardFile } from "../api";
 import { Heading } from "../components/Heading";
+import { usePersistentState } from "../hooks";
 import { MenuItem, PopMenu } from "../components/PopMenu";
 import { PromptEditor } from "../components/PromptEditor";
 import { invalidateWildcards } from "../prompt/complete";
@@ -22,6 +23,9 @@ interface Open {
 export function WildcardsPage() {
   const [files, setFiles] = useState<WildcardFile[] | null>(null);
   const [query, setQuery] = useState("");
+  // 開いているフォルダ ("" はルート)。絞り込み中は全部開く
+  const [expanded, setExpanded] = usePersistentState("ruiz.wildcards.folders", { open: [] as string[] });
+  const toggleFolder = (f: string) => setExpanded(({ open }) => ({ open: open.includes(f) ? open.filter((x) => x !== f) : [...open, f] }));
   const [open, setOpen] = useState<Open | null>(null);
   const [menu, setMenu] = useState<DOMRect | null>(null);
   const [busy, setBusy] = useState(false);
@@ -178,19 +182,30 @@ export function WildcardsPage() {
       {!files && <p className="text-sm text-muted">読み込み中…</p>}
       {files && !groups.length && <p className="text-sm text-muted">{query ? "当てはまるものがありません" : "ワイルドカードがありません"}</p>}
 
-      {groups.map(([folder, list]) => (
-        <section key={folder} className="mb-3">
-          {folder && <div className="mb-1 px-1 font-mono text-[11px] text-muted">{folder}/</div>}
-          <div className="overflow-hidden rounded-xl border border-line bg-surface">
-            {list.map((f) => (
-              <button key={f.name} onClick={() => openFile(f.name)} disabled={busy} className="flex w-full items-center gap-2 border-b border-line px-3 py-2.5 text-left last:border-b-0">
-                <span className="min-w-0 flex-1 truncate font-mono text-sm">{folder ? f.name.slice(folder.length + 1) : f.name}</span>
-                <span className="text-xs text-muted">{f.entries}</span>
+      <div className="overflow-hidden rounded-xl border border-line bg-surface empty:hidden">
+        {groups.map(([folder, list]) => {
+          const isOpen = !!query.trim() || expanded.open.includes(folder);
+          return (
+            <section key={folder} className="border-b border-line last:border-b-0">
+              <button onClick={() => toggleFolder(folder)} className="flex w-full items-center gap-2 px-3 py-2.5 text-left">
+                <FontAwesomeIcon icon={faChevronRight} className={`w-3 text-[10px] text-muted transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                <span className="min-w-0 flex-1 truncate font-mono text-sm">{folder ? `${folder}/` : "/"}</span>
+                <span className="text-xs text-muted">{list.length}</span>
               </button>
-            ))}
-          </div>
-        </section>
-      ))}
+              {isOpen && (
+                <div className="border-t border-line bg-bg/40">
+                  {list.map((f) => (
+                    <button key={f.name} onClick={() => openFile(f.name)} disabled={busy} className="flex w-full items-center gap-2 border-b border-line py-2.5 pr-3 pl-8 text-left last:border-b-0">
+                      <span className="min-w-0 flex-1 truncate font-mono text-sm">{folder ? f.name.slice(folder.length + 1) : f.name}</span>
+                      <span className="text-xs text-muted">{f.entries}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }

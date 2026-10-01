@@ -48,3 +48,19 @@ export function FilterChips<T extends string>({ items, value, onChange }: { item
     </div>
   );
 }
+
+export type SortBy = "mtime" | "name";
+
+/** 並び順の切り替え (新しい順 ⇔ 名前順)。検索欄の横に置く */
+export function SortButton({ value, onChange }: { value: SortBy; onChange: (v: SortBy) => void }) {
+  return (
+    <button onClick={() => onChange(value === "mtime" ? "name" : "mtime")} className="flex-none rounded-xl border border-line px-3 text-xs text-muted">
+      {value === "mtime" ? "新しい順" : "名前順"}
+    </button>
+  );
+}
+
+/** 新しい順 (ファイルの更新日時の降順) か名前順に並べる */
+export function sortItems<T extends { mtime: number }>(list: T[], by: SortBy, name: (x: T) => string) {
+  return [...list].sort((a, b) => (by === "mtime" ? b.mtime - a.mtime : 0) || name(a).localeCompare(name(b)));
+}

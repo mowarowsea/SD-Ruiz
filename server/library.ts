@@ -11,6 +11,8 @@ export interface Sidecar {
   base: string | null;
   trainedWords: string[];
   preview: string | null;
+  /** モデルファイルの更新日時 (ms)。ダウンロードした日の目安 */
+  mtime: number;
 }
 
 // StabilityMatrix / Forge / Civitai Helper が置くプレビュー画像の名前
@@ -68,7 +70,13 @@ export function readSidecar(modelPath: string): Sidecar {
   const declared = (cm?.BaseModel ?? civ?.baseModel) as string | undefined;
   const base = declared && !/^(other|unknown)$/i.test(declared) ? declared : (guessBase(modelPath) ?? declared ?? null);
   const trainedWords = asWords(cm ? cm.TrainedWords : civ?.trainedWords);
-  return { base, trainedWords, preview };
+  let mtime = 0;
+  try {
+    mtime = statSync(modelPath).mtimeMs;
+  } catch {
+    /* 消えたファイルは 0 (一覧の最後) */
+  }
+  return { base, trainedWords, preview, mtime };
 }
 
 /** モデル一覧ごとに付随ファイルを読むのは重いので、パス単位で覚えておく (メタ再取得のときに作り直す) */

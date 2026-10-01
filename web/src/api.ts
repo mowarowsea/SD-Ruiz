@@ -51,6 +51,8 @@ export interface Model {
   /** "Illustrious" / "Pony" / "SD 1.5" など */
   base: string | null;
   preview: boolean;
+  /** ファイルの更新日時 (ms) */
+  mtime: number;
 }
 
 export interface Meta {
@@ -89,6 +91,7 @@ export interface Lora {
   base: string | null;
   trainedWords: string[];
   preview: boolean;
+  mtime: number;
 }
 
 export type ModelParams = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler">;

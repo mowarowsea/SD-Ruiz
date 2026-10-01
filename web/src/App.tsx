@@ -53,7 +53,7 @@ export function App() {
     <>
       <header className="mx-auto flex max-w-xl items-center justify-between px-4 pt-[max(0.9rem,env(safe-area-inset-top))] pb-2">
         <div className="font-serif text-2xl tracking-wide">
-          Ru<span className="text-accent">i</span>z
+          SD-Ru<span className="text-accent">i</span>z
         </div>
         <ForgeBadge status={status} serverDown={serverDown} />
       </header>

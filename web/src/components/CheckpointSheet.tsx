@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { baseLabel, type Model, modelFolder, modelLabel, type Prefs } from "../api";
 import { Sheet } from "./Sheet";
-import { BaseBadge, FilterChips, Star, Thumb } from "./Thumb";
+import { usePersistentState } from "../hooks";
+import { BaseBadge, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
 
 type Filter = "all" | "fav" | "recent" | `folder:${string}`;
 
@@ -25,6 +26,7 @@ export function CheckpointSheet({
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
+  const [sort, setSort] = usePersistentState("ruiz.sort.checkpoint", { by: "mtime" as SortBy });
   const favs = new Set(prefs?.favoriteCheckpoints ?? []);
   const recent = prefs?.recentCheckpoints ?? [];
 
@@ -42,14 +44,17 @@ export function CheckpointSheet({
     if (filter === "fav") list = list.filter((m) => favs.has(m.title));
     else if (filter === "recent") list = recent.map((t) => list.find((m) => m.title === t)).filter((m): m is Model => !!m);
     else if (filter.startsWith("folder:")) list = list.filter((m) => modelFolder(m.title) === filter.slice(7));
-    if (filter !== "recent") list = [...list].sort((a, b) => modelLabel(a.title).localeCompare(modelLabel(b.title)));
+    if (filter !== "recent") list = sortItems(list, sort.by, (m) => modelLabel(m.title));
     return list;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [models, query, filter, prefs]);
+  }, [models, query, filter, prefs, sort.by]);
 
   return (
     <Sheet open={open} onClose={onClose} title="Checkpoint" aside={`${models.length} models`}>
-      <input className="field w-full text-sm" placeholder="🔍 モデルを検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+      <div className="flex gap-2">
+        <input className="field min-w-0 flex-1 text-sm" placeholder="🔍 モデルを検索" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <SortButton value={sort.by} onChange={(by) => setSort({ by })} />
+      </div>
       <FilterChips items={chips} value={filter} onChange={setFilter} />
       <ul className="grid grid-cols-2 gap-2.5">
         {shown.map((m) => (
