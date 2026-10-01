@@ -20,7 +20,7 @@ export function Sheet({ open, onClose, title, aside, children }: { open: boolean
       <div className="absolute inset-x-0 bottom-0 top-14 mx-auto flex max-w-xl flex-col rounded-t-3xl border-t border-line bg-bg px-4 pt-2.5">
         <button className="mx-auto mb-3 h-1 w-10 rounded bg-line" onClick={onClose} aria-label="閉じる" />
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="font-serif text-xl">{title}</h2>
+          <h2 className="text-lg font-semibold">{title}</h2>
           {aside && <span className="text-xs text-muted">{aside}</span>}
         </div>
         <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>

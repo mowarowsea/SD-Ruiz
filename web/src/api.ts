@@ -107,6 +107,9 @@ export interface GalleryFile {
   bytes: number;
   /** 保管庫 (Saved) にあるもの。Like 扱い */
   saved?: boolean;
+  /** Grid 表示で grid として出すもの (元画像が sources に付く)。grid の無い単体画像は false */
+  grid?: boolean;
+  sources?: GalleryFile[];
   tags?: GalleryTag[];
 }
 
@@ -160,8 +163,8 @@ export const api = {
   },
   galleryTags: () => request<{ tags: GalleryTag[] }>("/api/gallery/tags"),
   galleryInfo: (path: string, kind: GalleryKind) => request<GalleryInfo>(`/api/gallery/info?kind=${kind}&path=${encodeURIComponent(path)}`),
-  /** Like は保管庫への出し入れになり、移った先が file で返る */
-  toggleGalleryTag: (path: string, kind: GalleryKind, tagId: number) => post<{ on: boolean; count: number; file: GalleryFile | null }>("/api/gallery/tag", { path, kind, tagId }),
+  /** Like は保管庫への出し入れになる。付け外し後の状態 (移った先・タグ・元画像) が file で返る */
+  toggleGalleryTag: (path: string, kind: GalleryKind, tagId: number) => post<{ on: boolean; count: number; file: GalleryFile }>("/api/gallery/tag", { path, kind, tagId }),
   deleteGalleryFile: (path: string, kind: GalleryKind) => post<{ moved: number; bytes: number }>("/api/gallery/delete", { path, kind }),
   galleryImageUrl: (f: GalleryFile, thumb: boolean) => `/api/gallery/image/${thumb ? "thumb" : "file"}?path=${encodeURIComponent(f.path)}&t=${Math.round(f.mtime)}`,
   cleanupPreview: (keepSince: number) => post<CleanupPreview>("/api/cleanup/preview", { keepSince }),

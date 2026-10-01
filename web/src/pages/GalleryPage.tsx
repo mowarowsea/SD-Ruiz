@@ -99,14 +99,28 @@ export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; 
   }, [next, load]);
 
   const groups = useMemo(() => {
-    const out: { day: string; items: { file: GalleryFile; index: number }[] }[] = [];
-    files.forEach((file, index) => {
+    const out: { day: string; items: { file: GalleryFile }[] }[] = [];
+    files.forEach((file) => {
       const day = dayKey(file.mtime);
       if (out[out.length - 1]?.day !== day) out.push({ day, items: [] });
-      out[out.length - 1].items.push({ file, index });
+      out[out.length - 1].items.push({ file });
     });
     return out;
   }, [files]);
+
+  // ビューアで送る順番: Grid 表示では grid → その元画像 → 次の grid (grid の無い画像はそのまま) …
+  const items = useMemo(() => (kind === "grid" ? files.flatMap((f) => [f, ...(f.sources ?? [])]) : files), [files, kind]);
+  const itemIndex = useMemo(() => new Map(items.map((f, i) => [f.path, i])), [items]);
+
+  // ビューアでの変更を一覧に反映する (元画像は grid の sources の中にある)
+  const updateFiles = (fn: (f: GalleryFile) => GalleryFile | null) =>
+    setFiles((fs) =>
+      fs.flatMap((f) => {
+        const next = fn(f);
+        if (!next) return [];
+        return next.sources ? [{ ...next, sources: next.sources.flatMap((s) => fn(s) ?? []) }] : [next];
+      }),
+    );
 
   const today = dayKey(Date.now());
   const chips: { id: TagFilter; label: string }[] = [
@@ -153,12 +167,12 @@ export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; 
 
       {groups.map((g) => (
         <section key={g.day} className="mb-5">
-          <h2 className="mb-2 font-serif text-lg">{g.day === today ? "今日" : g.day}</h2>
+          <h2 className="mb-2 text-base font-semibold">{g.day === today ? "今日" : g.day}</h2>
           <div className={kind === "grid" ? "grid grid-cols-2 items-start gap-1.5" : "grid grid-cols-3 gap-1"}>
-            {g.items.map(({ file, index }) => (
+            {g.items.map(({ file }) => (
               <button
                 key={file.path}
-                onClick={() => setViewing(index)}
+                onClick={() => setViewing(itemIndex.get(file.path) ?? 0)}
                 className={`relative overflow-hidden rounded-md bg-surface ${kind === "grid" ? "min-h-20" : "aspect-square"}`}
               >
                 <img src={api.galleryImageUrl(file, true)} alt={file.name} loading="lazy" decoding="async" className={kind === "grid" ? "block w-full" : "size-full object-cover"} />
@@ -173,21 +187,21 @@ export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; 
       {loading && <p className="py-6 text-center text-sm text-muted">読み込み中…</p>}
       {!loading && !error && files.length === 0 && <p className="py-10 text-center text-sm text-muted">画像がありません</p>}
 
-      {viewing !== null && files[viewing] && (
+      {viewing !== null && items[viewing] && (
         <GalleryViewer
-          kind={kind}
-          files={files}
+          items={items}
           index={viewing}
           onIndex={setViewing}
           onClose={() => setViewing(null)}
           onNearEnd={() => next !== null && load(next)}
-          onFileChanged={(path, file) => setFiles((fs) => fs.map((f) => (f.path === path ? file : f)))}
-          onDeleted={(f) => {
-            const rest = files.filter((x) => x.path !== f.path);
-            setFiles(rest);
-            setTotal((t) => (t === null ? t : t - 1));
-            if (!rest.length) history.back();
-            else setViewing((i) => Math.min(i ?? 0, rest.length - 1));
+          onFileChanged={(path, file) => updateFiles((f) => (f.path === path ? { ...file, sources: file.sources ?? f.sources } : f))}
+          onDeleted={(deleted) => {
+            const top = files.some((f) => f.path === deleted.path);
+            const left = items.length - 1 - (deleted.sources?.length ?? 0);
+            updateFiles((f) => (f.path === deleted.path ? null : f));
+            if (top) setTotal((t) => (t === null ? t : t - 1));
+            if (left <= 0) history.back();
+            else setViewing((i) => Math.min(i ?? 0, left - 1));
           }}
           customTags={tags}
           meta={meta}

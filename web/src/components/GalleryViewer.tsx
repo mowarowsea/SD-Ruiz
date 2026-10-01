@@ -1,17 +1,20 @@
-import { useEffect, useRef, useState } from "react";
-import { api, type GalleryFile, type GalleryInfo, type GalleryKind, type GalleryTag, type GenerateParams, type Meta } from "../api";
+import { faCircleInfo, faClone, faFileArrowDown, faTags, faTrashCan } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { api, type GalleryFile, type GalleryInfo, type GalleryTag, type GenerateParams, type Meta } from "../api";
 import { infotextToParams, parseInfotext } from "../infotext";
 import { ImageViewer } from "./ImageViewer";
 import { PromptEditor } from "./PromptEditor";
 
 /**
  * ギャラリーの画像詳細。ビューアの操作 (左右で送る・真ん中で閉じる) に、下部の操作バーを重ねる。
+ * Grid 表示では grid → その元画像 → 次の grid … の順に送る (items は並べ終わったもの)。
  * grid のタグは元画像にも同じように付け外しされ、削除も元画像ごとゴミ箱フォルダへ移る。
  * Like は保管庫 (Saved) への出し入れで、付けると grid と元画像が保管庫へ移る
  */
 export function GalleryViewer({
-  kind,
-  files,
+  items,
   index,
   onIndex,
   onClose,
@@ -22,8 +25,7 @@ export function GalleryViewer({
   meta,
   onUseSettings,
 }: {
-  kind: GalleryKind;
-  files: GalleryFile[];
+  items: GalleryFile[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
@@ -35,24 +37,26 @@ export function GalleryViewer({
   meta: Meta | null;
   onUseSettings: (p: Partial<GenerateParams>) => void;
 }) {
-  const file = files[index];
+  const file = items[index];
+  const kind = file?.grid ? "grid" : "image";
   const [infos, setInfos] = useState<Record<string, GalleryInfo>>({});
   const [panel, setPanel] = useState(false);
+  const [menu, setMenu] = useState<"tags" | "settings" | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const info = file && infos[file.path];
-  const tags = info?.tags ?? file?.tags ?? [];
-  const like = customTags.find((t) => t.name === "like");
+  const tags = file?.tags ?? info?.tags ?? [];
   // ビューアを閉じ終わってから (履歴を戻してから) 実行したい処理
   const afterClose = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     setMessage(null);
+    setMenu(null);
     if (!file || infos[file.path]) return;
     api.galleryInfo(file.path, kind).then(
       (i) => setInfos((m) => ({ ...m, [file.path]: i })),
       (e) => setMessage({ text: (e as Error).message, error: true }),
     );
-    if (index >= files.length - 4) onNearEnd();
+    if (index >= items.length - 6) onNearEnd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.path]);
 
@@ -63,24 +67,19 @@ export function GalleryViewer({
     try {
       const r = await api.toggleGalleryTag(file.path, kind, t.id);
       const extra = r.count > 1 ? ` (元画像 ${r.count - 1} 枚も)` : "";
-      if (r.file) {
-        // Like: 保管庫へ移した / 出力フォルダへ戻した。場所が変わったので詳細は取り直す
-        onFileChanged(file.path, r.file);
-        setMessage({ text: r.on ? `Like して保管庫へ移しました${extra}` : `Like を外して出力フォルダへ戻しました${extra}` });
-        return;
-      }
-      const next = r.on ? [...tags.filter((x) => x.id !== t.id), t] : tags.filter((x) => x.id !== t.id);
-      setInfos((m) => (m[file.path] ? { ...m, [file.path]: { ...m[file.path], tags: next } } : m));
-      onFileChanged(file.path, { ...file, tags: next });
-      setMessage({ text: `${t.name} を${r.on ? "付けました" : "外しました"}${extra}` });
+      const moved = r.file && r.file.path !== file.path;
+      if (r.file) onFileChanged(file.path, r.file);
+      if (moved) setMessage({ text: r.on ? `Like して保管庫へ移しました${extra}` : `Like を外して出力フォルダへ戻しました${extra}` });
+      else setMessage({ text: `${t.name} を${r.on ? "付けました" : "外しました"}${extra}` });
     } catch (e) {
       setMessage({ text: (e as Error).message, error: true });
     }
   };
 
-  const applySettings = () => {
+  const applySettings = (keepSeed: boolean) => {
     if (!info) return;
     const params = infotextToParams(parseInfotext(info.geninfo), meta);
+    if (!keepSeed) params.seed = -1;
     afterClose.current = () => onUseSettings(params);
     history.back();
   };
@@ -104,8 +103,9 @@ export function GalleryViewer({
   };
 
   const remove = async () => {
-    const extra = kind === "grid" && info?.sources.length ? ` と元画像 ${info.sources.length} 枚` : "";
-    if (!confirm(`${file.name}${extra} をゴミ箱フォルダへ移しますか？\n(メニューの「整理」から空にするまでは元に戻せます)`)) return;
+    const n = file.sources?.length ?? 0;
+    const extra = n ? ` と元画像 ${n} 枚` : "";
+    if (!confirm(`${file.name}${extra} をゴミ箱フォルダへ移しますか？\n(「整理」から空にするまでは元に戻せます)`)) return;
     try {
       await api.deleteGalleryFile(file.path, kind);
       onDeleted(file);
@@ -117,11 +117,12 @@ export function GalleryViewer({
   const parsed = info ? parseInfotext(info.geninfo) : null;
   const prompt = parsed && (parsed.params["Template"] ?? parsed.prompt);
   const negative = parsed && (parsed.params["Negative Template"] ?? parsed.negative);
+  const seed = parsed?.params["Seed"];
 
   return (
     <ImageViewer
-      images={files.map((f) => api.galleryImageUrl(f, false))}
-      placeholders={files.map((f) => api.galleryImageUrl(f, true))}
+      images={items.map((f) => api.galleryImageUrl(f, false))}
+      placeholders={items.map((f) => api.galleryImageUrl(f, true))}
       index={index}
       onIndex={onIndex}
       onClose={() => {
@@ -130,9 +131,10 @@ export function GalleryViewer({
         afterClose.current = null;
       }}
       loop={false}
+      showCounter={false}
       overlay={
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-[max(2rem,calc(env(safe-area-inset-top)+1.25rem))] text-center font-mono text-[10px] text-white/45">
+          <div className="pointer-events-none absolute inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] text-center font-mono text-[10px] text-white/45">
             {new Date(file.mtime).toLocaleString("sv-SE")} · {file.saved && "保管庫 · "}
             {file.name}
           </div>
@@ -164,42 +166,40 @@ export function GalleryViewer({
                   </Section>
                 </>
               )}
-              {customTags.length > 0 && (
-                <Section title="Tags">
-                  <div className="flex flex-wrap gap-1.5">
-                    {customTags.map((t) => (
-                      <button
-                        key={t.id}
-                        onClick={() => toggleTag(t)}
-                        className={`rounded-full border px-3 py-1 text-xs ${has(t) ? "border-accent bg-accent text-accent-ink" : "border-line text-muted"}`}
-                      >
-                        {t.name}
-                      </button>
-                    ))}
-                  </div>
-                </Section>
-              )}
-              {kind === "grid" && info && (
-                <Section title={`元画像 ${info.sources.length} 枚`}>
-                  <div className="flex gap-1.5 overflow-x-auto">
-                    {info.sources.map((s) => (
-                      <img key={s.path} src={api.galleryImageUrl(s, true)} alt={s.name} title={s.name} className="h-24 flex-none rounded-md" />
-                    ))}
-                    {info.sources.length === 0 && <p className="text-[11px] text-muted">見つかりませんでした</p>}
-                  </div>
-                </Section>
-              )}
             </div>
           )}
 
+          {menu && <button className="absolute inset-0 cursor-default" aria-label="閉じる" onClick={() => setMenu(null)} />}
+
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
+            {menu === "tags" && (
+              <PopMenu>
+                {customTags.map((t) => (
+                  <MenuItem key={t.id} onClick={() => toggleTag(t)} active={has(t)}>
+                    <span className="w-4 text-center">{has(t) ? "✓" : ""}</span>
+                    {t.name === "like" ? "♥ Like (保管庫)" : t.name}
+                  </MenuItem>
+                ))}
+              </PopMenu>
+            )}
+            {menu === "settings" && (
+              <PopMenu>
+                <MenuItem onClick={() => applySettings(true)}>
+                  Seed も引き継ぐ{seed && <span className="ml-auto font-mono text-[10px] text-muted">{seed}</span>}
+                </MenuItem>
+                <MenuItem onClick={() => applySettings(false)}>
+                  Seed は引き継がない<span className="ml-auto font-mono text-[10px] text-muted">-1</span>
+                </MenuItem>
+              </PopMenu>
+            )}
+
             {message && <p className={`mx-auto mb-1 max-w-xl px-4 text-center text-xs break-words ${message.error ? "text-danger" : "text-white/70"}`}>{message.text}</p>}
             <div className="mx-auto flex max-w-xl justify-around text-white/85">
-              {like && <BarButton icon={has(like) ? "♥" : "♡"} label="Like" active={has(like)} onClick={() => toggleTag(like)} />}
-              <BarButton icon="ⓘ" label="情報" active={panel} onClick={() => setPanel((v) => !v)} />
-              <BarButton icon="✎" label="この設定で" onClick={applySettings} disabled={!info} />
-              <BarButton icon="↗" label="保存" onClick={share} />
-              <BarButton icon="🗑" label="削除" onClick={remove} />
+              <BarButton icon={faTags} label="タグ" active={menu === "tags" || tags.length > 0} onClick={() => setMenu((m) => (m === "tags" ? null : "tags"))} />
+              <BarButton icon={faCircleInfo} label="情報" active={panel} onClick={() => setPanel((v) => !v)} />
+              <BarButton icon={faClone} label="to t2i" active={menu === "settings"} onClick={() => setMenu((m) => (m === "settings" ? null : "settings"))} disabled={!info} />
+              <BarButton icon={faFileArrowDown} label="保存" onClick={share} />
+              <BarButton icon={faTrashCan} label="削除" onClick={remove} />
             </div>
           </div>
         </>
@@ -208,7 +208,7 @@ export function GalleryViewer({
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mb-3 last:mb-0">
       <div className="mb-1 text-[10px] tracking-wider text-muted uppercase">{title}</div>
@@ -217,10 +217,23 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function BarButton({ icon, label, onClick, active = false, disabled = false }: { icon: string; label: string; onClick: () => void; active?: boolean; disabled?: boolean }) {
+/** 操作バーのすぐ上に出す小さな選択肢 (外側をタップすると閉じる) */
+function PopMenu({ children }: { children: ReactNode }) {
+  return <div className="absolute inset-x-0 bottom-full mx-auto mb-1 w-64 max-w-[calc(100%-2rem)] overflow-hidden rounded-xl border border-line bg-surface shadow-xl">{children}</div>;
+}
+
+function MenuItem({ onClick, active = false, children }: { onClick: () => void; active?: boolean; children: ReactNode }) {
   return (
-    <button onClick={onClick} disabled={disabled} className={`flex w-16 flex-col items-center gap-0.5 py-1 text-[10px] disabled:opacity-40 ${active ? "text-accent" : ""}`}>
-      <span className="text-xl leading-none">{icon}</span>
+    <button onClick={onClick} className={`flex w-full items-center gap-2 border-b border-line px-4 py-3 text-left text-sm last:border-b-0 ${active ? "text-accent" : ""}`}>
+      {children}
+    </button>
+  );
+}
+
+function BarButton({ icon, label, onClick, active = false, disabled = false }: { icon: IconDefinition; label: string; onClick: () => void; active?: boolean; disabled?: boolean }) {
+  return (
+    <button onClick={onClick} disabled={disabled} className={`flex w-16 flex-col items-center gap-1 py-1 text-[10px] disabled:opacity-40 ${active ? "text-accent" : ""}`}>
+      <FontAwesomeIcon icon={icon} className="text-lg" />
       {label}
     </button>
   );

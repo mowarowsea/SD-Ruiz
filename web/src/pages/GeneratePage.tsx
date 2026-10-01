@@ -107,7 +107,7 @@ export function GeneratePage({
           {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
           {running ? (
             <div className="flex gap-2">
-              <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center font-serif text-lg">
+              <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
                 <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
                 <span className="relative">{runningLabel(progress)}</span>
               </div>
@@ -116,7 +116,7 @@ export function GeneratePage({
               </button>
             </div>
           ) : (
-            <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 font-serif text-lg tracking-wide text-accent-ink disabled:opacity-40">
+            <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
               生成
             </button>
           )}

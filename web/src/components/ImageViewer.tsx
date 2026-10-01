@@ -9,6 +9,7 @@ import { type ReactNode, useEffect, useRef } from "react";
  * loop: 端まで行ったら反対側に戻る (生成結果用)。ギャラリーのように続きを読み込む一覧では false にする
  * placeholders: 元画像を読み込むまで下に敷いておく画像 (サムネイル)
  * overlay: 画像の上に重ねる操作バーなど (タップ領域より手前に出る)
+ * showCounter: 上部に「1 / 3」を出す (続きを読み込む一覧では件数に意味がないので消す)
  */
 export function ImageViewer({
   images,
@@ -18,6 +19,7 @@ export function ImageViewer({
   loop = true,
   placeholders,
   overlay,
+  showCounter = true,
 }: {
   images: string[];
   index: number;
@@ -26,6 +28,7 @@ export function ImageViewer({
   loop?: boolean;
   placeholders?: string[];
   overlay?: ReactNode;
+  showCounter?: boolean;
 }) {
   const count = images.length;
   const step = (d: number) => {
@@ -65,7 +68,7 @@ export function ImageViewer({
     <div className="fixed inset-0 z-50 bg-black select-none" role="dialog" aria-modal="true">
       {placeholders?.[index] && <img src={placeholders[index]} alt="" className={imgClass} draggable={false} />}
       <img key={images[index]} src={images[index]} alt={`画像 ${index + 1}`} className={imgClass} draggable={false} />
-      {count > 1 && (
+      {showCounter && count > 1 && (
         <div className="pointer-events-none absolute inset-x-0 top-[max(0.75rem,env(safe-area-inset-top))] text-center font-mono text-xs text-white/60">
           {index + 1} / {count}
         </div>

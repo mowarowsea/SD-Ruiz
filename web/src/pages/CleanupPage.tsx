@@ -11,7 +11,7 @@ const startOfToday = () => {
  * 整理: タグ (Like など) の付いていない grid と画像をまとめてゴミ箱フォルダへ移す。
  * タグ付きの grid の元画像や、タグ付きの画像を含む grid は残る。ゴミ箱を空にするまでは元に戻せる
  */
-export function CleanupPage({ onBack }: { onBack: () => void }) {
+export function CleanupPage() {
   const [keepToday, setKeepToday] = useState(true);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
   const [trash, setTrash] = useState<{ dir: string; files: number; bytes: number } | null>(null);
@@ -78,10 +78,7 @@ export function CleanupPage({ onBack }: { onBack: () => void }) {
 
   return (
     <div className="pb-24">
-      <button onClick={onBack} className="mb-2 text-xs text-muted">
-        ‹ メニュー
-      </button>
-      <h1 className="mb-1 font-serif text-2xl">整理</h1>
+      <h1 className="mb-1 text-xl font-semibold">整理</h1>
       <p className="mb-4 text-xs leading-relaxed text-muted">
         タグが付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。Like したものは保管庫 (Saved) にあるので対象外です。ほかのタグ付きの grid の元画像と、タグ付きの画像を含む grid も残ります。
       </p>

@@ -5,10 +5,12 @@ import { BottomNav, type Tab } from "./components/BottomNav";
 import { useForgeStatus, useJob, usePersistentState } from "./hooks";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
-import { MorePage } from "./pages/MorePage";
+import { CleanupPage } from "./pages/CleanupPage";
 
 export function App() {
   const [nav, setNav] = usePersistentState<{ tab: Tab }>("ruiz.nav", { tab: "generate" });
+  // 前のバージョンで保存した、今は無い画面
+  if (!["generate", "gallery", "cleanup"].includes(nav.tab)) nav.tab = "generate";
   const { status, serverDown } = useForgeStatus();
   const [meta, setMeta] = useState<Meta | null>(null);
   const jobState = useJob();
@@ -61,7 +63,7 @@ export function App() {
             <GalleryPage active={nav.tab === "gallery"} meta={meta} onUseSettings={applySettings} />
           </div>
         )}
-        {nav.tab === "more" && <MorePage />}
+        {nav.tab === "cleanup" && <CleanupPage />}
       </main>
 
       <BottomNav tab={nav.tab} onChange={(tab) => setNav({ tab })} />

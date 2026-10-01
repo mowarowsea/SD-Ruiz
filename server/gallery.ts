@@ -27,6 +27,10 @@ export interface GalleryFile {
   bytes: number;
   /** 保管庫 (Saved) にあるもの */
   saved?: boolean;
+  /** 一覧で grid として扱うもの (元画像が sources に付く) */
+  grid?: boolean;
+  sources?: GalleryFile[];
+  tags?: CustomTag[];
 }
 
 export interface CustomTag {
@@ -45,8 +49,6 @@ export interface GalleryOptions {
 const imageExt = /\.(png|jpe?g|webp|avif)$/i;
 /** grid と元画像の保存時刻の差の上限 */
 const sourceWindowMs = 2 * 60 * 1000;
-/** 1 回の生成で作る枚数の上限 (Seed での絞り込み用) */
-const maxBatch = 16;
 const key = (p: string) => p.toLowerCase();
 const under = (p: string, root: string) => key(p).startsWith(key(root) + "\\") || key(p).startsWith(key(root) + "/");
 /** 保管庫の中で grid とみなす名前 ("grid-0205.png" "2026-04-02_grid-0079.png" など) */
@@ -146,7 +148,7 @@ export class Gallery {
   private folders: { grid: string[]; image: string[] } | null = null;
   private readonly scanner = new FolderScanner();
   private tagCache: { at: number; map: Map<string, CustomTag[]>; all: CustomTag[] } | null = null;
-  private seedCache = new Map<string, number | null>();
+  private mapCache: { sig: string; strict: Map<string, GalleryFile[]>; wide: Map<string, GalleryFile[]>; gridOfImage: Map<string, GalleryFile>; orphans: GalleryFile[] } | null = null;
 
   constructor(
     forgeUrl: string,
@@ -207,24 +209,39 @@ export class Gallery {
     return this.opts.iibDb;
   }
 
-  /** パス → カスタムタグ。タグを付け外ししたら invalidateTags() で捨てる */
+  /**
+   * パス → カスタムタグ。読み直しは 1 秒ほどかかる (image_tag に tag_id の索引が無い) ので、
+   * SD-Ruiz から付け外ししたときは patchTags() で手元の分だけ直す
+   */
   private tags() {
     if (this.tagCache && Date.now() - this.tagCache.at < 60_000) return this.tagCache;
     const db = new DatabaseSync(this.dbPath(), { readOnly: true });
     try {
       const all = db.prepare("SELECT id, name FROM tag WHERE type = 'custom' ORDER BY id").all() as unknown as CustomTag[];
-      const rows = db
-        .prepare("SELECT i.path AS path, t.id AS id, t.name AS name FROM image_tag it JOIN tag t ON t.id = it.tag_id JOIN image i ON i.id = it.image_id WHERE t.type = 'custom'")
-        .all() as unknown as { path: string; id: number; name: string }[];
+      const byId = new Map(all.map((t) => [t.id, t]));
+      const rows = all.length
+        ? (db.prepare(`SELECT i.path AS path, it.tag_id AS id FROM image_tag it JOIN image i ON i.id = it.image_id WHERE it.tag_id IN (${all.map((t) => t.id).join(",")})`).all() as unknown as { path: string; id: number }[])
+        : [];
       const map = new Map<string, CustomTag[]>();
       for (const r of rows) {
         const k = key(r.path);
-        map.set(k, [...(map.get(k) ?? []), { id: r.id, name: r.name }]);
+        map.set(k, [...(map.get(k) ?? []), byId.get(r.id)!]);
       }
       this.tagCache = { at: Date.now(), map, all };
       return this.tagCache;
     } finally {
       db.close();
+    }
+  }
+
+  /** IIB に書き込んだ付け外しを手元の一覧にも反映する */
+  private patchTags(paths: string[], tagId: number, on: boolean) {
+    const c = this.tagCache;
+    const tag = c?.all.find((t) => t.id === tagId);
+    if (!c || !tag) return;
+    for (const p of paths) {
+      const rest = (c.map.get(key(p)) ?? []).filter((t) => t.id !== tagId);
+      c.map.set(key(p), on ? [...rest, tag] : rest);
     }
   }
 
@@ -279,11 +296,13 @@ export class Gallery {
     return { grids, images, orphans, children };
   }
 
-  /** 一覧に出す全件 (出力フォルダ + 保管庫)。grid 表示では grid の無い単体画像も保管庫から出す */
-  private async allFiles(kind: Kind) {
+  /** 一覧に出す全件 (出力フォルダ + 保管庫)。grid 表示では grid の無い単体画像 (バッチ 1 の生成など) も混ぜる */
+  private async allFiles(kind: Kind): Promise<GalleryFile[]> {
     const s = await this.savedIndex();
-    const saved = kind === "grid" ? [...s.grids, ...s.orphans] : s.images;
-    return [...(await this.files(kind)), ...saved].sort((a, b) => b.mtime - a.mtime);
+    if (kind === "image") return [...(await this.files("image")), ...s.images].sort((a, b) => b.mtime - a.mtime);
+    const asGrid = (f: GalleryFile) => ({ ...f, grid: true });
+    const out = [...(await this.files("grid")).map(asGrid), ...(await this.outputMap()).orphans, ...s.grids.map(asGrid), ...s.orphans];
+    return out.sort((a, b) => b.mtime - a.mtime);
   }
 
   /**
@@ -303,7 +322,10 @@ export class Gallery {
     }
     const page = files.slice(opts.offset, opts.offset + opts.limit);
     return {
-      files: page.map((f) => ({ ...f, tags: tagsOf(f) })),
+      // grid には元画像も付けて返す (ビューアで grid → 元画像 → 次の grid … と送るため)
+      files: await Promise.all(
+        page.map(async (f) => ({ ...f, tags: tagsOf(f), ...(f.grid && { sources: (await this.sources(f.path)).map((x) => ({ ...x, tags: tagsOf(x) })) }) })),
+      ),
       next: opts.offset + opts.limit < files.length ? opts.offset + opts.limit : null,
       total: files.length,
     };
@@ -327,7 +349,8 @@ export class Gallery {
 
   /** IIB の索引からプロンプトなどの部分一致で探す (該当パスの集合を返す) */
   private async search(kind: Kind, q: string) {
-    const folder_paths = (await this.getFolders())[kind];
+    const f = await this.getFolders();
+    const folder_paths = kind === "grid" ? [...f.grid, ...f.image] : f.image;
     const hits = new Set<string>();
     let cursor = "";
     for (let i = 0; i < 20; i++) {
@@ -348,43 +371,58 @@ export class Gallery {
 
   // ---- grid と元画像 ----
 
-  private async gridSeed(gridPath: string) {
-    if (this.seedCache.has(gridPath)) return this.seedCache.get(gridPath)!;
-    const info = await this.geninfo(gridPath).catch(() => "");
-    const m = /\bSeed:\s*(\d+)/.exec(info);
-    const seed = m ? Number(m[1]) : null;
-    this.seedCache.set(gridPath, seed);
-    return seed;
+  /**
+   * 出力フォルダの grid ごとの元画像と、grid の無い単体画像 (バッチ 1 の生成)。フォルダが変わったときだけ作り直す
+   * - wide: 「1 つ前の grid から、この grid までの間」かつ grid との時間差 2 分以内の画像 (整理で取りこぼさないよう広め)
+   * - strict: wide のうち、最後の画像から Seed が 1 ずつ (または同じ値で) 続いている部分 (直前のバッチ 1 の画像を除く)
+   */
+  private async outputMap() {
+    const grids = await this.files("grid");
+    const images = await this.files("image");
+    const sig = `${grids.length}:${grids[0]?.mtime}:${images.length}:${images[0]?.mtime}`;
+    if (this.mapCache?.sig === sig) return this.mapCache;
+    const gridsAsc = [...grids].reverse();
+    const imagesAsc = [...images].reverse();
+    const strict = new Map<string, GalleryFile[]>();
+    const wide = new Map<string, GalleryFile[]>();
+    const gridOfImage = new Map<string, GalleryFile>();
+    const used = new Set<string>();
+    let j = 0;
+    let prev = 0;
+    for (const g of gridsAsc) {
+      while (j < imagesAsc.length && imagesAsc[j].mtime <= prev) j++;
+      const win: GalleryFile[] = [];
+      for (let k = j; k < imagesAsc.length && imagesAsc[k].mtime <= g.mtime + 1000; k++) {
+        if (g.mtime - imagesAsc[k].mtime <= sourceWindowMs) win.push(imagesAsc[k]);
+      }
+      const seeds = win.map((f) => fileSeed(f.name));
+      let start = 0;
+      if (win.length > 1 && seeds.every((s) => s !== null)) {
+        start = win.length - 1;
+        // 6 月以前は名前の数字が Seed ではなく日時 ("00052-20260630093422.png") で、バッチ内で同じ値になる
+        while (start > 0 && (seeds[start - 1] === seeds[start]! - 1 || seeds[start - 1] === seeds[start])) start--;
+      }
+      const run = win.slice(start);
+      strict.set(key(g.path), run);
+      wide.set(key(g.path), win);
+      for (const f of win) gridOfImage.set(key(f.path), g);
+      for (const f of run) used.add(key(f.path));
+      prev = g.mtime;
+    }
+    const orphans = images.filter((f) => !used.has(key(f.path)));
+    this.mapCache = { sig, strict, wide, gridOfImage, orphans };
+    return this.mapCache;
   }
 
-  /** grid の元画像 (useSeed: grid の Seed でも絞る。整理のときは取りこぼさないよう false で広めに取る) */
-  async sources(gridPath: string, useSeed = true): Promise<GalleryFile[]> {
+  /** grid の元画像 (wide: 整理のときは取りこぼさないよう広めに取る) */
+  async sources(gridPath: string, wide = false): Promise<GalleryFile[]> {
     if (await this.isSaved(gridPath)) {
       if (!isGridName(basename(gridPath))) return [];
       return ((await this.savedIndex()).children.get(key(gridPath)) ?? []).sort((a, b) => a.name.localeCompare(b.name));
     }
     if (!(await this.getFolders()).grid.some((r) => under(gridPath, r))) return [];
-    const grids = await this.files("grid");
-    const images = await this.files("image");
-    const i = grids.findIndex((g) => key(g.path) === key(gridPath));
-    if (i === -1) return [];
-    const grid = grids[i];
-    const prev = grids[i + 1]?.mtime ?? 0; // 新しい順なので 1 つ後ろが直前の grid
-    let found = images.filter((img) => img.mtime > prev && img.mtime <= grid.mtime + 1000 && grid.mtime - img.mtime <= sourceWindowMs);
-    if (useSeed) {
-      const seed = await this.gridSeed(grid.path);
-      if (seed !== null) found = found.filter((img) => {
-        const s = fileSeed(img.name);
-        return s === null || (s >= seed && s < seed + maxBatch);
-      });
-    }
-    return found.sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  /** 単体画像からそれを含む grid を探す (保存時刻の直後にある grid) */
-  private gridOf(img: GalleryFile, gridsAsc: GalleryFile[]) {
-    const g = gridsAsc.find((x) => x.mtime + 1000 >= img.mtime);
-    return g && g.mtime - img.mtime <= sourceWindowMs ? g : null;
+    const m = await this.outputMap();
+    return [...((wide ? m.wide : m.strict).get(key(gridPath)) ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   }
 
   // ---- 詳細・タグ付け ----
@@ -400,7 +438,8 @@ export class Gallery {
 
   /**
    * タグの付け外し。grid のときは元画像にも同じように付け外しする
-   * Like は保管庫への出し入れになる (付けると grid と元画像を保管庫へ移し、外すと出力フォルダへ戻す)。移した先は file で返す
+   * Like は保管庫への出し入れになる (付けると grid と元画像を保管庫へ移し、外すと出力フォルダへ戻す)。
+   * 付け外し後の状態 (移した先・タグ・元画像) を file で返す
    */
   async toggleTag(path: string, tagId: number) {
     const saved = await this.isSaved(path);
@@ -411,8 +450,8 @@ export class Gallery {
     }
     const on = !this.tagsOf(path).some((t) => t.id === tagId);
     await this.post("/db/batch_update_image_tag", { img_paths: paths, action: on ? "add" : "remove", tag_id: tagId });
-    this.invalidateTags();
-    return { on, count: paths.length, file: null };
+    this.patchTags(paths, tagId, on);
+    return { on, count: paths.length, file: await this.fileAt(path, saved) };
   }
 
   // ---- 保管庫への出し入れ ----
@@ -426,13 +465,17 @@ export class Gallery {
       renameSync(from, to);
       for (const t of this.tagsOf(from)) if (t.id !== like?.id) retag.set(t.id, [...(retag.get(t.id) ?? []), to]);
     }
-    for (const [tag_id, img_paths] of retag) await this.post("/db/batch_update_image_tag", { img_paths, action: "add", tag_id }).catch(() => {});
-    this.invalidateTags();
+    for (const [tag_id, img_paths] of retag) {
+      await this.post("/db/batch_update_image_tag", { img_paths, action: "add", tag_id }).catch(() => {});
+      this.patchTags(img_paths, tag_id, true);
+    }
   }
 
   private async fileAt(path: string, saved: boolean): Promise<GalleryFile> {
     const s = statSync(path);
-    return { path, name: basename(path), mtime: s.mtimeMs, bytes: s.size, saved, tags: this.tagsOf(path, saved) } as GalleryFile;
+    const grid = saved ? isGridName(basename(path)) : (await this.getFolders()).grid.some((r) => under(path, r));
+    const sources = grid ? (await this.sources(path)).map((x) => ({ ...x, tags: this.tagsOf(x.path, saved) })) : undefined;
+    return { path, name: basename(path), mtime: s.mtimeMs, bytes: s.size, saved, grid, sources, tags: this.tagsOf(path, saved) };
   }
 
   /** 出力フォルダ → 保管庫。paths[0] が本体 (grid なら続きが元画像) */
@@ -472,8 +515,10 @@ export class Gallery {
     // 出力フォルダに Like のタグが残っていれば外す (戻した途端に Like 扱いにならないように)
     const like = this.likeTag();
     await this.relocate(moves);
-    if (like) await this.post("/db/batch_update_image_tag", { img_paths: moves.map((m) => m.to), action: "remove", tag_id: like.id }).catch(() => {});
-    this.invalidateTags();
+    if (like) {
+      await this.post("/db/batch_update_image_tag", { img_paths: moves.map((m) => m.to), action: "remove", tag_id: like.id }).catch(() => {});
+      this.patchTags(moves.map((m) => m.to), like.id, false);
+    }
     return this.fileAt(main, false);
   }
 
@@ -553,17 +598,17 @@ export class Gallery {
     this.invalidateTags();
     const grids = await this.files("grid");
     const images = await this.files("image");
-    const gridsAsc = [...grids].sort((a, b) => a.mtime - b.mtime);
+    const map = await this.outputMap();
     const tagged = (f: GalleryFile) => this.tagsOf(f.path).length > 0;
 
     const keep = new Set<string>();
     for (const g of grids.filter(tagged)) {
       keep.add(key(g.path));
-      for (const s of await this.sources(g.path, false)) keep.add(key(s.path));
+      for (const s of map.wide.get(key(g.path)) ?? []) keep.add(key(s.path));
     }
     for (const img of images.filter(tagged)) {
       keep.add(key(img.path));
-      const g = this.gridOf(img, gridsAsc);
+      const g = map.gridOfImage.get(key(img.path));
       if (g) keep.add(key(g.path));
     }
     const target = (f: GalleryFile) => f.mtime < keepSince && !keep.has(key(f.path));
