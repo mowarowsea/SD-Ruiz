@@ -1,15 +1,23 @@
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
+import { TagDictionary, listWildcards } from "./dictionary.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
 
 const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
+const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
+const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
+
+// Tailscale 越しのスマホ向けに JS やタグ候補を圧縮して返す (画像は対象外)
+await server.register(fastifyCompress, { threshold: 1024, customTypes: /^(text\/|application\/(json|javascript))/ });
 
 server.setErrorHandler((err, _req, reply) => {
   if (err instanceof ForgeError) return reply.code(502).send({ error: err.message });
@@ -32,6 +40,27 @@ server.get("/api/meta", async () => {
     models: models.map((m) => ({ title: m.title, name: m.model_name, filename: m.filename })),
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
+  };
+});
+
+// プロンプト補完: タグは件数が多いのでサーバー側で検索する
+server.get<{ Querystring: { q?: string; limit?: string } }>("/api/tags", async (req) => ({
+  tags: tags.search(req.query.q ?? "", Math.min(Number(req.query.limit) || 20, 50)),
+}));
+
+// ワイルドカードと LoRA は数が少ないので一覧を返してフロントで絞り込む
+server.get("/api/wildcards", async () => ({ wildcards: await listWildcards(wildcardsDir) }));
+
+server.get("/api/loras", async () => {
+  const loras = await forge.loras();
+  const root = /[\\/]models[\\/]Lora[\\/]/i;
+  return {
+    loras: loras
+      .map((l) => {
+        const rel = l.path.split(root).pop() ?? l.name;
+        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/") };
+      })
+      .sort((a, b) => a.name.localeCompare(b.name)),
   };
 });
 
@@ -119,3 +148,4 @@ if (existsSync(dist)) {
 
 await server.listen({ port: cfg.port, host: cfg.host });
 server.log.info(`Forge: ${cfg.forgeUrl}`);
+server.log.info(cfg.forgeDir ? `タグ ${tags.size} 件を読み込みました` : "forgeDir が未設定なのでタグ補完は無効です");

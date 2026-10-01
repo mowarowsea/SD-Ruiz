@@ -36,6 +36,20 @@ export interface GenerateParams {
   batch: number;
 }
 
+export interface TagHit {
+  name: string;
+  category: number;
+  count: number;
+  alias?: string;
+  translation?: string;
+}
+
+export interface Lora {
+  name: string;
+  alias: string;
+  folder: string;
+}
+
 export interface JobView {
   id: string;
   status: "running" | "done" | "error";
@@ -78,6 +92,9 @@ export const api = {
   generate: (params: GenerateParams) => post<{ id: string }>("/api/generate", params),
   interrupt: () => post<{ ok: boolean }>("/api/interrupt", {}),
   job: () => request<JobState>("/api/job"),
+  tags: (q: string, signal?: AbortSignal) => request<{ tags: TagHit[] }>(`/api/tags?q=${encodeURIComponent(q)}`, { signal }),
+  wildcards: () => request<{ wildcards: string[] }>("/api/wildcards"),
+  loras: () => request<{ loras: Lora[] }>("/api/loras"),
   imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,
 };
 

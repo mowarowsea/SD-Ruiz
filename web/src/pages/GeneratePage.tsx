@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
+import { PromptEditor } from "../components/PromptEditor";
 import { ParamsAccordion } from "../components/ParamsAccordion";
 import { ResultView } from "../components/ResultView";
 import { useJob, usePersistentState } from "../hooks";
@@ -61,26 +62,10 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
       </button>
 
       <Label>Prompt</Label>
-      <textarea
-        className="field block min-h-36 w-full resize-y font-mono text-[13px] leading-relaxed"
-        value={form.prompt}
-        onChange={(e) => patch({ prompt: e.target.value })}
-        placeholder="masterpiece, best quality, 1girl, ..."
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-      />
+      <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" />
 
       <Label>Negative</Label>
-      <textarea
-        className="field block min-h-24 w-full resize-y font-mono text-[13px] leading-relaxed"
-        value={form.negative}
-        onChange={(e) => patch({ negative: e.target.value })}
-        placeholder="lowres, bad anatomy, ..."
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-      />
+      <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" />
 
       <div className="mt-4">
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} />

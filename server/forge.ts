@@ -17,6 +17,12 @@ export interface ForgeModel {
   filename: string;
 }
 
+export interface ForgeLora {
+  name: string;
+  alias: string;
+  path: string;
+}
+
 export interface ForgeProgress {
   progress: number;
   eta_relative: number;
@@ -111,6 +117,10 @@ export class ForgeClient {
 
   schedulers() {
     return this.get<{ name: string; label: string }[]>("/sdapi/v1/schedulers");
+  }
+
+  loras() {
+    return this.get<ForgeLora[]>("/sdapi/v1/loras", 30_000);
   }
 
   async currentCheckpoint(): Promise<string | null> {

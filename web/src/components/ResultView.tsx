@@ -1,7 +1,10 @@
+import { useState } from "react";
 import { api, type JobView, type Progress } from "../api";
+import { ImageViewer } from "./ImageViewer";
 
 /** 生成中はライブプレビュー、完了後は結果画像を並べる */
 export function ResultView({ job, progress, onUseSeed }: { job: JobView | null; progress: Progress | null; onUseSeed: (seed: number) => void }) {
+  const [viewing, setViewing] = useState<number | null>(null);
   if (!job) return null;
 
   if (job.status === "running") {
@@ -29,9 +32,9 @@ export function ResultView({ job, progress, onUseSeed }: { job: JobView | null; 
           const seed = job.seeds[i];
           return (
             <figure key={i} className="relative overflow-hidden rounded-2xl border border-line bg-surface">
-              <a href={api.imageUrl(job.id, i)} target="_blank" rel="noreferrer">
+              <button className="block w-full" onClick={() => setViewing(i)}>
                 <img src={api.imageUrl(job.id, i)} alt={`生成結果 ${i + 1}`} className="w-full" />
-              </a>
+              </button>
               {seed !== undefined && (
                 <figcaption className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 font-mono text-[10px] text-white">
                   {i === 0 && seconds && <span>{seconds}s ·</span>}
@@ -45,6 +48,9 @@ export function ResultView({ job, progress, onUseSeed }: { job: JobView | null; 
           );
         })}
       </div>
+      {viewing !== null && (
+        <ImageViewer images={Array.from({ length: job.imageCount }, (_, i) => api.imageUrl(job.id, i))} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
+      )}
     </div>
   );
 }
