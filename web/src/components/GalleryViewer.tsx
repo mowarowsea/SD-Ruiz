@@ -43,8 +43,9 @@ export function GalleryViewer({
   const [infos, setInfos] = useState<Record<string, GalleryInfo>>({});
   const [panel, setPanel] = useState(false);
   const [menu, setMenu] = useState<{ kind: "tags" | "settings"; anchor: DOMRect } | null>(null);
+  // ボタンの位置はクリックの処理中に取る (setMenu の更新関数は後で呼ばれることがあり、そのときには e.currentTarget が null)
   const openMenu = (kind: "tags" | "settings", e: MouseEvent<HTMLButtonElement>) =>
-    setMenu((m) => (m?.kind === kind ? null : { kind, anchor: e.currentTarget.getBoundingClientRect() }));
+    setMenu(menu?.kind === kind ? null : { kind, anchor: e.currentTarget.getBoundingClientRect() });
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const info = file && infos[file.path];
   const tags = file?.tags ?? info?.tags ?? [];

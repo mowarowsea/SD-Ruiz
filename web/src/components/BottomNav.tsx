@@ -43,7 +43,7 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
         <div className="mx-auto flex h-15 max-w-xl">
           <NavButton icon={faWandMagicSparkles} label="生成" active={tab === "generate"} onClick={() => onChange("generate")} />
           <NavButton icon={faImages} label="ギャラリー" active={tab === "gallery"} onClick={() => onChange("gallery")} />
-          <NavButton icon={faPuzzlePiece} label="Extras" active={inExtras || !!menu} onClick={(e) => setMenu((m) => (m ? null : e.currentTarget.getBoundingClientRect()))} />
+          <NavButton icon={faPuzzlePiece} label="Extras" active={inExtras || !!menu} onClick={(e) => setMenu(menu ? null : e.currentTarget.getBoundingClientRect())} />
         </div>
       </nav>
     </>
