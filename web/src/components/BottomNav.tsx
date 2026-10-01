@@ -42,7 +42,7 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
         </PopMenu>
       )}
       <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]">
-        <div className="mx-auto flex h-15 max-w-xl">
+        <div className="mx-auto flex h-12 max-w-xl">
           <NavButton icon={faWandMagicSparkles} label="生成" active={tab === "generate"} onClick={() => onChange("generate")} />
           <NavButton icon={faImages} label="ギャラリー" active={tab === "gallery"} onClick={() => onChange("gallery")} />
           <NavButton icon={faPuzzlePiece} label="Extras" active={inExtras || !!menu} onClick={(e) => setMenu(menu ? null : e.currentTarget.getBoundingClientRect())} />
@@ -54,8 +54,8 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
 
 function NavButton({ icon, label, active, onClick }: { icon: IconDefinition; label: string; active: boolean; onClick: (e: MouseEvent<HTMLButtonElement>) => void }) {
   return (
-    <button onClick={onClick} className={`flex flex-1 flex-col items-center justify-center gap-1 text-[10px] ${active ? "text-accent" : "text-muted"}`}>
-      <FontAwesomeIcon icon={icon} className="text-lg" />
+    <button onClick={onClick} className={`flex flex-1 flex-col items-center justify-center gap-0.5 text-[10px] leading-none ${active ? "text-accent" : "text-muted"}`}>
+      <FontAwesomeIcon icon={icon} className="text-base" />
       {label}
     </button>
   );

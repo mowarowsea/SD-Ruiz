@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
@@ -132,6 +133,13 @@ server.get<{ Querystring: { q?: string; edited?: string } }>("/api/tags/translat
   total: tags.translationCount,
 }));
 server.put<{ Body: { name?: string; text?: string } }>("/api/tags/translation", async (req) => ({ tag: tags.setTranslation(req.body.name ?? "", req.body.text ?? "") }));
+
+// トークン数を数えるための CLIP の BPE (SDXL の CLIP-L と同じもの)。数えるのはフロント側
+const mergesFile = cfg.forgeDir && join(cfg.forgeDir, "backend/huggingface/stabilityai/stable-diffusion-xl-base-1.0/tokenizer/merges.txt");
+server.get("/api/tokenizer/merges", async (_req, reply) => {
+  if (!mergesFile || !existsSync(mergesFile)) return reply.code(404).send({ error: "CLIP の merges.txt が見つかりません" });
+  return reply.type("text/plain; charset=utf-8").header("cache-control", "max-age=86400").send(await readFile(mergesFile, "utf8"));
+});
 
 // ワイルドカードと LoRA は数が少ないので一覧を返してフロントで絞り込む
 server.get("/api/wildcards", async () => ({ wildcards: (await wildcards.list()).map((w) => w.name) }));

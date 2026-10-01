@@ -73,7 +73,7 @@ export function GeneratePage({
   const lastSeed = last?.seeds.length ? last.seeds[0] : null;
 
   return (
-    <div className="pb-44">
+    <div className="pb-20">
       <button onClick={() => setSheet("checkpoint")} className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-2.5 text-left" disabled={!meta}>
         <Thumb kind="checkpoint" id={form.checkpoint} has={!!model?.preview} className="size-14 flex-none rounded-xl" />
         <div className="min-w-0 flex-1">
@@ -101,26 +101,24 @@ export function GeneratePage({
 
       <ResultView job={job} last={last} progress={progress} />
 
-      {/* 生成ボタン (下部ナビの上に固定) */}
-      <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 bg-gradient-to-t from-bg from-60% to-transparent px-4 pt-6 pb-3">
-        <div className="mx-auto max-w-xl">
-          {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
-          {running ? (
-            <div className="flex gap-2">
-              <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
-                <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
-                <span className="relative">{runningLabel(progress)}</span>
-              </div>
-              <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
-                中断
-              </button>
+      {/* 生成ボタン (生成画像の下。下に固定するとスマホでプロンプトを打つときにキーボードと重なって邪魔なので) */}
+      <div className="mt-3">
+        {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
+        {running ? (
+          <div className="flex gap-2">
+            <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
+              <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
+              <span className="relative">{runningLabel(progress)}</span>
             </div>
-          ) : (
-            <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
-              生成
+            <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
+              中断
             </button>
-          )}
-        </div>
+          </div>
+        ) : (
+          <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
+            生成
+          </button>
+        )}
       </div>
 
       {meta && (

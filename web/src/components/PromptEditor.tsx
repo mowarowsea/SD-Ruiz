@@ -2,10 +2,11 @@ import { autocompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers as lineNumbersExt, placeholder as placeholderExt, tooltips } from "@codemirror/view";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useReducer, useRef } from "react";
 import { isUsed, promptCompletion, translateSelection, translationColumn } from "../prompt/complete";
 import { promptHighlight } from "../prompt/highlight";
-import { promptStructure } from "../prompt/structure";
+import { foldAll, promptStructure } from "../prompt/structure";
+import { countTokens, loadTokenizer, onTokenizerReady } from "../prompt/tokens";
 
 const theme = EditorView.theme(
   {
@@ -75,6 +76,7 @@ export function PromptEditor({
       }),
     });
     view.current = v;
+    foldAll(v);
     return () => v.destroy();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -82,8 +84,31 @@ export function PromptEditor({
   // 外から値が変わったとき (設定の読み込みなど) だけ反映する
   useEffect(() => {
     const v = view.current;
-    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+    if (v && v.state.doc.toString() !== value) {
+      v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+      foldAll(v);
+    }
   }, [value]);
 
-  return <div ref={host} className="field cursor-text focus-within:border-accent" style={{ minHeight }} onClick={() => view.current?.focus()} />;
+  // 右上のトークン数 (ワイルドカードは 1 行ずつ別の候補なので出さない)
+  const showCount = !lineNumbers;
+  const [tokenizerVersion, tokenizerLoaded] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!showCount) return;
+    void loadTokenizer();
+    return onTokenizerReady(tokenizerLoaded);
+  }, [showCount]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const tokens = useMemo(() => (showCount && value ? countTokens(value) : null), [showCount, value, tokenizerVersion]);
+
+  return (
+    <div className="relative">
+      <div ref={host} className="field cursor-text focus-within:border-accent" style={{ minHeight }} onClick={() => view.current?.focus()} />
+      {tokens && (
+        <span className={`pointer-events-none absolute -top-2 right-3 rounded bg-bg px-1.5 font-mono text-[10px] leading-4 ${tokens.count > 75 && !tokens.words ? "text-accent" : "text-muted"}`}>
+          {tokens.words ? `${tokens.count} 語` : `${tokens.count}/${tokens.limit}`}
+        </span>
+      )}
+    </div>
+  );
 }

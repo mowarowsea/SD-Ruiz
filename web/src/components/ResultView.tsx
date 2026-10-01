@@ -17,12 +17,11 @@ function formatDuration(ms: number) {
  */
 export function ResultView({ job, last, progress }: { job: JobView | null; last: JobView | null; progress: Progress | null }) {
   const [viewing, setViewing] = useState<number | null>(null);
-  const count = last?.imageCount ?? 0;
-  // Forge は grid を先頭に返すが、画面とビューアでは 画像 1, 画像 2, …, grid の順に並べる
-  const hasGrid = !!last && count > last.seeds.length && last.seeds.length > 1;
-  const order = Array.from({ length: count }, (_, i) => i);
-  if (hasGrid) order.push(order.shift()!);
-  const urls = last ? order.map((i) => api.imageUrl(last.id, i)) : [];
+  // Forge は複数枚のとき grid を先頭に返すが、画面とビューアには 1 枚ずつの画像だけ出す (grid はギャラリーで見る)
+  const total = last?.imageCount ?? 0;
+  const skip = last && total > last.seeds.length && last.seeds.length > 1 ? 1 : 0;
+  const count = total - skip;
+  const urls = last ? Array.from({ length: count }, (_, i) => api.imageUrl(last.id, i + skip)) : [];
   const open = (i: number) => count > 0 && setViewing(i);
 
   const viewer = viewing !== null && count > 0 && (
@@ -32,7 +31,7 @@ export function ResultView({ job, last, progress }: { job: JobView | null; last:
   const thumbs = (dim: boolean) => (
     <div className={count > 1 ? "grid grid-cols-2 gap-2" : ""}>
       {urls.map((url, i) => (
-        <figure key={url} className={`relative overflow-hidden rounded-2xl border border-line bg-surface ${hasGrid && i === count - 1 ? "col-span-2" : ""}`}>
+        <figure key={url} className="relative overflow-hidden rounded-2xl border border-line bg-surface">
           <button className="block w-full" onClick={() => open(i)}>
             <img src={url} alt={`生成結果 ${i + 1}`} className={`w-full transition-opacity ${dim ? "opacity-35" : ""}`} />
           </button>
