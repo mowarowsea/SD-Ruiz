@@ -41,7 +41,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
 - txt2img のみ (img2img / inpaint / ControlNet / ADetailer / Hires fix は対象外)
 - 画面: 下部ナビに 生成 / ギャラリー / Extras。Extras はたまに使うおまけ機能 (ギャラリー整理 / ワイルドカード / Forge 起動・診断) で、タップすると Extras ボタンのすぐ上に小さなメニューが出る (メニュー専用のページは作らない)。機能はここに増やしていく。メニューは名前だけで説明文は付けない (準備中のものだけ「準備中」と出す)
 - 説明文は見出しの (i) を押したときだけ出す (どの画面も同じ)
-- 文字: ロゴ (「Ruiz」のみ) だけ Serif (DM Serif Display)。それ以外は OS の日本語ゴシック (Hiragino Sans / Yu Gothic UI など)。アイコンは Font Awesome
+- 文字: ロゴ (「Ruiz」のみ) だけ Serif (DM Serif Display)。それ以外は DryEyes と同じ OS 標準のゴシック (-apple-system / Segoe UI など。日本語は OS の既定)。プロンプト・ファイル名・ログ・数値は等幅 (JetBrains Mono)。アイコンは Font Awesome
 - デザイン: Atelier (暖色寄りのダーク + セリフ体の見出し)、アクセントは彩度を落としたローズ `#c99bab` (`mockups/index.html`)
 - 生成画面: Prompt と Negative は常に表示 (Negative もよく使う)。Params (サイズ / Steps / CFG / Sampler / Scheduler / Seed / Batch) はほとんど変えないのでアコーディオンで畳む
 - 数値は基本的に手打ちで入力する (スライダーは使わない)
