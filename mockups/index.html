@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SD-Ruiz モックアップ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0d0b0c; color: #ddd; font-family: Inter, "Noto Sans JP", sans-serif; padding: 20px 16px 60px; }
+  .page-head { max-width: 1180px; margin: 0 auto 16px; }
+  .page-head h1 { font-size: 18px; font-weight: 600; }
+  .page-head p { font-size: 13px; color: #8a8086; margin-top: 4px; }
+  .switcher { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; align-items: center; }
+  .switcher button { font: inherit; font-size: 13px; padding: 7px 13px; border-radius: 999px; border: 1px solid #332b30; background: #181416; color: #ccc; cursor: pointer; display: flex; gap: 7px; align-items: center; }
+  .switcher button.on { border-color: #eee; color: #fff; }
+  .switcher i { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  .stage { display: flex; gap: 26px; justify-content: center; flex-wrap: wrap; max-width: 1180px; margin: 0 auto; }
+  .screen-label { font-size: 12px; color: #7a7075; text-align: center; margin-bottom: 8px; }
+
+  /* ===== tokens: Atelier (warm dark tinted toward plum) ===== */
+  .phone {
+    --bg: #171214; --surface: #221a1e; --surface2: #2b2126; --line: #3b2e34; --ink: #f2e6ea; --muted: #9b8a91;
+    --ok: #8fbf6a; --warn: #e0a13c;
+    --w1: #f0c6d4; --w2: #ffd7e3; --num: var(--accent); --dyn: #9fc6e0; --wild: #c9b3f0; --lora: var(--accent); --lora-bg: color-mix(in srgb, var(--accent) 16%, transparent); --brk: #e3a33b;
+    --radius: 14px;
+    width: 360px; max-width: 100%; height: 760px; border-radius: 36px; border: 8px solid #28222a; overflow: hidden; position: relative;
+    background: var(--bg); color: var(--ink); font-family: Inter, "Noto Sans JP", sans-serif; display: flex; flex-direction: column;
+  }
+  .a-rose  { --accent: #e094ad; --accent-ink: #22101a; }
+  .a-d1    { --accent: #d897ad; --accent-ink: #22101a; }
+  .a-d2    { --accent: #d095a9; --accent-ink: #22101a; }
+  .a-d3    { --accent: #c99bab; --accent-ink: #22101a; }
+
+  .scroll { flex: 1; overflow-y: auto; padding: 4px 14px 150px; }
+  .scroll::-webkit-scrollbar { display: none; }
+  .top { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
+  .logo { font-family: "DM Serif Display", serif; font-size: 22px; letter-spacing: .02em; }
+  .logo small { font-family: Inter, "Noto Sans JP", sans-serif; font-size: 10px; color: var(--muted); margin-left: 6px; }
+  .logo em { font-style: normal; color: var(--accent); }
+  .status { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); }
+  .title { font-family: "DM Serif Display", serif; font-size: 20px; }
+
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+  .row { display: flex; gap: 12px; padding: 10px; align-items: center; }
+  .thumb { width: 52px; height: 52px; border-radius: 10px; flex: none; }
+  .t1 { background: linear-gradient(135deg, #f3a683, #786fa6 60%, #303952); }
+  .t2 { background: linear-gradient(160deg, #63cdda, #3b3b98); }
+  .t3 { background: linear-gradient(135deg, #f7d794, #e15f41); }
+  .t4 { background: linear-gradient(135deg, #c8d6e5, #576574); }
+  .t5 { background: linear-gradient(135deg, #ff9ff3, #5f27cd); }
+  .t6 { background: linear-gradient(135deg, #1dd1a1, #222f3e); }
+  .t7 { background: linear-gradient(180deg, #ffaaa5, #6c5b7b 70%, #355c7d); }
+  .t8 { background: linear-gradient(135deg, #e8c1d0, #8e5572); }
+  .name { font-size: 14px; font-weight: 600; }
+  .sub { font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; background: var(--surface2); color: var(--accent); letter-spacing: .04em; }
+  .chev { margin-left: auto; color: var(--muted); font-size: 18px; }
+
+  .label { font-size: 11px; color: var(--muted); margin: 16px 2px 6px; display: flex; justify-content: space-between; align-items: center; letter-spacing: .06em; text-transform: uppercase; }
+  .label .act { text-transform: none; letter-spacing: 0; color: var(--accent); display: flex; gap: 10px; }
+
+  /* prompt editor */
+  .editor { padding: 12px; font-family: "JetBrains Mono", "Noto Sans JP", monospace; font-size: 12.5px; line-height: 2.05; word-break: break-word; }
+  .w-up1 { color: var(--w1); } .w-up2 { color: var(--w2); font-weight: 600; }
+  .w-down { color: var(--muted); text-decoration: line-through; }
+  .paren { color: var(--muted); } .num { color: var(--num); }
+  .dyn { color: var(--dyn); } .dyn b { color: var(--muted); font-weight: 400; }
+  .wild { color: var(--wild); border-bottom: 1px dashed var(--wild); }
+  .lora { display: inline-flex; align-items: center; gap: 4px; background: var(--lora-bg); color: var(--lora); border-radius: 999px; padding: 0 8px; font-size: 11.5px; line-height: 1.7; }
+  .lora i { font-style: normal; opacity: .75; }
+  .brk { color: var(--brk); font-weight: 700; }
+  .tr { font-size: 9px; line-height: 1.2; color: var(--muted); font-family: "Noto Sans JP", sans-serif; white-space: nowrap; display: none; }
+  .show-tr .tr { display: block; }
+  .show-tr .editor { line-height: 2.3; }
+  .show-tr .editor .tk { display: inline-flex; flex-direction: column; vertical-align: top; line-height: 1.5; margin-top: .25em; }
+
+  .collapsed { padding: 11px 12px; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 12px; }
+  .chip span { color: var(--muted); font-size: 10px; margin-right: 4px; }
+  .lora-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .lchip { display: flex; align-items: center; gap: 6px; background: var(--lora-bg); color: var(--accent); border-radius: 999px; padding: 5px 10px 5px 5px; font-size: 12px; }
+  .lchip .mini { width: 22px; height: 22px; border-radius: 50%; }
+  .lchip b { font-weight: 600; color: var(--ink); opacity: .8; }
+  .lchip.add { background: transparent; border: 1px dashed var(--line); color: var(--muted); padding: 5px 12px; }
+
+  .result { height: 170px; margin-top: 16px; border-radius: var(--radius); position: relative; }
+  .result .meta { position: absolute; bottom: 8px; left: 8px; font-size: 10px; background: rgba(0,0,0,.55); color: #fff; padding: 3px 7px; border-radius: 4px; }
+
+  /* dock + nav */
+  .dock { position: absolute; left: 0; right: 0; bottom: 62px; padding: 12px 14px 6px; background: linear-gradient(transparent, var(--bg) 30%); }
+  .gen { width: 100%; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-family: "DM Serif Display", serif; font-size: 17px; padding: 14px; position: relative; overflow: hidden; letter-spacing: .04em; }
+  .gen .bar { position: absolute; left: 0; top: 0; bottom: 0; width: 42%; background: rgba(255,255,255,.2); }
+  .gen .txt { position: relative; }
+  .gen-sub { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 6px; padding: 0 4px; }
+  .nav { position: absolute; left: 0; right: 0; bottom: 0; height: 62px; display: flex; border-top: 1px solid var(--line); background: var(--bg); padding-bottom: 6px; }
+  .nav div { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 10px; color: var(--muted); }
+  .nav div b { font-size: 18px; font-weight: 400; line-height: 1; }
+  .nav div.on { color: var(--accent); }
+
+  /* sheet */
+  .sheet-bg { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
+  .sheet { position: absolute; left: 0; right: 0; bottom: 0; top: 64px; background: var(--bg); border-radius: 22px 22px 0 0; border-top: 1px solid var(--line); padding: 10px 14px; overflow: hidden; }
+  .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line); margin: 0 auto 12px; }
+  .sheet-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .sheet-head span { font-size: 12px; color: var(--muted); }
+  .search { padding: 10px 12px; font-size: 13px; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin: 12px 0; overflow-x: auto; scrollbar-width: none; }
+  .tabs span { flex: none; white-space: nowrap; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .tabs span.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .gcard { overflow: hidden; }
+  .gcard .img { height: 112px; position: relative; }
+  .gcard .img .badge { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); }
+  .gcard .img .fav { position: absolute; top: 4px; right: 7px; color: var(--accent); font-size: 14px; }
+  .gcard .cap { padding: 7px 8px; font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gcard .cap small { display: block; font-weight: 400; font-size: 10px; color: var(--muted); }
+  .gcard.cur { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* lora list */
+  .llist { display: flex; flex-direction: column; gap: 8px; }
+  .litem { display: flex; gap: 10px; align-items: center; padding: 8px; }
+  .litem .thumb { width: 46px; height: 46px; }
+  .litem .name { font-size: 13px; }
+  .litem .on-mark { margin-left: auto; font-size: 11px; color: var(--accent-ink); background: var(--accent); border-radius: 999px; padding: 3px 9px; font-weight: 600; }
+  .litem .off-mark { margin-left: auto; font-size: 18px; color: var(--muted); }
+  .litem.sel { border-color: var(--accent); }
+  .slider { margin-top: 8px; display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); }
+  .slider .track { flex: 1; height: 4px; background: var(--line); border-radius: 2px; position: relative; }
+  .slider .track::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 60%; background: var(--accent); border-radius: 2px; }
+  .slider .track::after { content: ""; position: absolute; left: 60%; top: 50%; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%; background: var(--ink); }
+  .slider b { color: var(--ink); font-family: "JetBrains Mono", monospace; }
+
+  /* gallery */
+  .gfilter { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin: 4px 0 10px; }
+  .gfilter span { flex: none; font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .gfilter span.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .day { font-size: 11px; color: var(--muted); margin: 12px 2px 6px; display: flex; justify-content: space-between; }
+  .pics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; }
+  .pics div { aspect-ratio: 2 / 3; border-radius: 4px; position: relative; }
+  .pics div.like::after { content: "♥"; position: absolute; right: 4px; bottom: 2px; font-size: 12px; color: var(--accent); text-shadow: 0 0 3px rgba(0,0,0,.6); }
+
+  /* detail */
+  .detail-img { height: 330px; margin: 0 -14px; }
+  .actions { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+  .actions div { text-align: center; font-size: 10px; color: var(--muted); padding: 8px 0; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+  .actions div b { display: block; font-size: 16px; font-weight: 400; color: var(--ink); margin-bottom: 2px; }
+  .actions div.on b { color: var(--accent); }
+  .primary { margin-top: 10px; width: 100%; border: 0; border-radius: 12px; background: var(--accent); color: var(--accent-ink); font: inherit; font-weight: 600; font-size: 14px; padding: 12px; }
+  .kv { font-size: 12px; padding: 10px 12px; display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; }
+  .kv span { color: var(--muted); }
+
+  /* wildcards */
+  .crumb { font-size: 12px; color: var(--muted); margin: 2px 2px 10px; }
+  .crumb b { color: var(--ink); font-weight: 600; }
+  .wlist { display: flex; flex-direction: column; }
+  .witem { display: flex; align-items: center; gap: 10px; padding: 11px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .witem:last-child { border-bottom: 0; }
+  .witem .ic { width: 18px; text-align: center; color: var(--muted); }
+  .witem .cnt { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .witem.open { background: var(--surface2); }
+  .lines { font-family: "JetBrains Mono", "Noto Sans JP", monospace; font-size: 12px; }
+  .line { display: flex; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--line); align-items: baseline; }
+  .line:last-child { border-bottom: 0; }
+  .line .ln { color: var(--muted); font-size: 10px; width: 14px; text-align: right; flex: none; }
+  .line .x { margin-left: auto; color: var(--muted); }
+  .line.editing { background: var(--surface2); box-shadow: inset 2px 0 var(--accent); }
+  .caret { display: inline-block; width: 1.5px; height: 1.1em; background: var(--accent); vertical-align: -2px; margin-left: 1px; }
+  .dice { margin-top: 12px; padding: 10px 12px; }
+  .dice .h { font-size: 11px; color: var(--muted); display: flex; justify-content: space-between; }
+  .dice .h b { color: var(--accent); font-weight: 600; }
+  .dice ul { list-style: none; margin-top: 6px; font-family: "JetBrains Mono", monospace; font-size: 12px; }
+  .dice li { padding: 3px 0; }
+  .dice li::before { content: "→ "; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="page-head">
+    <h1>SD-Ruiz モックアップ v2 — Atelier</h1>
+    <p>アクセントカラー: Rose の彩度を段階的に落とした 3 案。下は全画面を並べたもの (スマホは縦スクロール)。</p>
+    <div class="switcher">
+      <button data-a="rose"><i style="background:#e094ad"></i>Rose (前回)</button>
+      <button data-a="d1"><i style="background:#d897ad"></i>Dusty 1</button>
+      <button data-a="d2" class="on"><i style="background:#d095a9"></i>Dusty 2</button>
+      <button data-a="d3"><i style="background:#c99bab"></i>Dusty 3</button>
+      <button id="trbtn">翻訳表示 ON/OFF</button>
+    </div>
+  </div>
+
+  <div class="stage">
+
+    <!-- ① メイン -->
+    <div>
+      <div class="screen-label">① 生成</div>
+      <div class="phone show-tr">
+        <div class="top"><div class="logo">Ru<em>i</em>z<small>ルイス</small></div><div class="status"><span class="dot"></span>Forge</div></div>
+        <div class="scroll">
+          <div class="card row">
+            <div class="thumb t1"></div>
+            <div><div class="name">amanatsuIllustrious_v2</div><div class="sub"><span class="badge">XL</span>&nbsp; 前回: Euler a · 28 step</div></div>
+            <div class="chev">›</div>
+          </div>
+
+          <div class="label">Prompt <span class="act"><span>翻訳</span><span>整形</span></span></div>
+          <div class="card editor">
+            <span class="tk w-up1">masterpiece<span class="tr">傑作</span></span>, <span class="tk">best quality<span class="tr">最高品質</span></span>,
+            <span class="paren">(</span><span class="tk w-up2">1girl<span class="tr">女の子1人</span></span><span class="paren">:</span><span class="num">1.2</span><span class="paren">)</span>,
+            <span class="dyn">{red<b>|</b>blue<b>|</b>silver}</span> <span class="tk">hair<span class="tr">髪</span></span>, <span class="wild">__cosplay__</span>,
+            <span class="tk">looking back<span class="tr">振り返り</span></span>, <span class="lora">◆ detail_tweaker <i>0.6</i></span>,
+            <span class="paren">[</span><span class="tk"><span class="w-down">blurry</span><span class="tr">ぼやけ</span></span><span class="paren">]</span>,<br />
+            <span class="brk">BREAK</span> <span class="tk">sunset<span class="tr">夕焼け</span></span>, <span class="tk">cityscape<span class="tr">街並み</span></span>
+          </div>
+          <div class="card collapsed" style="margin-top:8px"><span>Negative</span><span>lowres, bad anatomy… ▾</span></div>
+
+          <div class="label">LoRA <span class="act"><span>＋ 追加</span></span></div>
+          <div class="lora-row">
+            <div class="lchip"><div class="mini t5"></div>detail_tweaker <b>0.6</b></div>
+            <div class="lchip"><div class="mini t8"></div>soft_light <b>0.4</b></div>
+            <div class="lchip add">＋</div>
+          </div>
+
+          <div class="label">Params</div>
+          <div class="chips">
+            <div class="chip"><span>SIZE</span>832×1216</div>
+            <div class="chip"><span>STEP</span>28</div>
+            <div class="chip"><span>CFG</span>5.0</div>
+            <div class="chip"><span>SAMPLER</span>Euler a</div>
+            <div class="chip"><span>SEED</span>🎲 random</div>
+            <div class="chip"><span>BATCH</span>×2</div>
+          </div>
+
+          <div class="result t7"><div class="meta">12s · seed 2918843301</div></div>
+        </div>
+        <div class="dock">
+          <button class="gen"><div class="bar"></div><span class="txt">生成中 12 / 28</span></button>
+          <div class="gen-sub"><span>残り 約7秒</span><span>長押しで中断</span></div>
+        </div>
+        <div class="nav"><div class="on"><b>✎</b>生成</div><div><b>▦</b>ギャラリー</div><div><b>✦</b>ワイルドカード</div></div>
+      </div>
+    </div>
+
+    <!-- ② Checkpoint -->
+    <div>
+      <div class="screen-label">② Checkpoint 選択</div>
+      <div class="phone">
+        <div class="top"><div class="logo">Ru<em>i</em>z<small>ルイス</small></div><div class="status"><span class="dot"></span>Forge</div></div>
+        <div class="sheet-bg"></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="sheet-head"><div class="title">Checkpoint</div><span>22 models</span></div>
+          <div class="card search">🔍 モデルを検索</div>
+          <div class="tabs"><span class="on">★ お気に入り</span><span>最近</span><span>anime</span><span>semi-real</span><span>XL</span><span>Flux</span></div>
+          <div class="grid">
+            <div class="card gcard cur"><div class="img t1"><span class="badge">XL</span><span class="fav">★</span></div><div class="cap">amanatsuIllustrious_v2<small>使用中</small></div></div>
+            <div class="card gcard"><div class="img t2"><span class="badge">XL</span><span class="fav">★</span></div><div class="cap">semiRealIllustrious_v40<small>2日前</small></div></div>
+            <div class="card gcard"><div class="img t3"><span class="badge">XL</span><span class="fav">★</span></div><div class="cap">crisp_v20<small>先週</small></div></div>
+            <div class="card gcard"><div class="img t4"><span class="badge">XL</span></div><div class="cap">cgf2387_v40<small>先週</small></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③ LoRA -->
+    <div>
+      <div class="screen-label">③ LoRA 選択</div>
+      <div class="phone">
+        <div class="top"><div class="logo">Ru<em>i</em>z<small>ルイス</small></div><div class="status"><span class="dot"></span>Forge</div></div>
+        <div class="sheet-bg"></div>
+        <div class="sheet">
+          <div class="grab"></div>
+          <div class="sheet-head"><div class="title">LoRA</div><span>2 / 187 使用中</span></div>
+          <div class="card search">🔍 LoRA を検索</div>
+          <div class="tabs"><span class="on">使用中</span><span>★ お気に入り</span><span>最近</span><span>style</span><span>concept</span><span>slider</span></div>
+          <div class="llist">
+            <div class="card litem sel" style="flex-wrap:wrap">
+              <div class="thumb t5"></div>
+              <div><div class="name">detail_tweaker</div><div class="sub">トリガー: なし</div></div>
+              <div class="on-mark">ON</div>
+              <div class="slider" style="flex-basis:100%"><span>weight</span><div class="track"></div><b>0.60</b></div>
+            </div>
+            <div class="card litem sel">
+              <div class="thumb t8"></div>
+              <div><div class="name">soft_light</div><div class="sub">トリガー: soft lighting</div></div>
+              <div class="on-mark">0.4</div>
+            </div>
+            <div class="card litem"><div class="thumb t6"></div><div><div class="name">watercolor_style</div><div class="sub">最近: 3日前</div></div><div class="off-mark">＋</div></div>
+            <div class="card litem"><div class="thumb t3"></div><div><div class="name">film_grain_xl</div><div class="sub">最近: 先週</div></div><div class="off-mark">＋</div></div>
+            <div class="card litem"><div class="thumb t2"></div><div><div class="name">age_slider</div><div class="sub">slider · −3 〜 3</div></div><div class="off-mark">＋</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ④ ギャラリー -->
+    <div>
+      <div class="screen-label">④ ギャラリー</div>
+      <div class="phone">
+        <div class="top"><div class="title">Gallery</div><div class="status">22,009 枚</div></div>
+        <div class="scroll" style="padding-bottom:80px">
+          <div class="card search">🔍 プロンプト・モデルで検索</div>
+          <div class="gfilter" style="margin-top:10px"><span class="on">すべて</span><span>♥ Like</span><span>今日</span><span>このモデル</span><span>タグ…</span></div>
+          <div class="day"><span>今日 · 10/01</span><span>18 枚</span></div>
+          <div class="pics">
+            <div class="t7 like"></div><div class="t1"></div><div class="t5"></div>
+            <div class="t8"></div><div class="t3 like"></div><div class="t2"></div>
+          </div>
+          <div class="day"><span>昨日 · 09/30</span><span>64 枚</span></div>
+          <div class="pics">
+            <div class="t4"></div><div class="t6 like"></div><div class="t1"></div>
+            <div class="t2"></div><div class="t8"></div><div class="t5"></div>
+          </div>
+        </div>
+        <div class="nav"><div><b>✎</b>生成</div><div class="on"><b>▦</b>ギャラリー</div><div><b>✦</b>ワイルドカード</div></div>
+      </div>
+    </div>
+
+    <!-- ⑤ 画像詳細 -->
+    <div>
+      <div class="screen-label">⑤ 画像詳細</div>
+      <div class="phone">
+        <div class="top"><div class="status" style="font-size:18px;color:var(--ink)">‹</div><div class="status">3 / 18</div></div>
+        <div class="scroll" style="padding-bottom:20px">
+          <div class="detail-img t7"></div>
+          <div class="actions">
+            <div class="on"><b>♥</b>Like</div><div><b>#</b>タグ</div><div><b>⇪</b>共有</div><div><b>🗑</b>削除</div>
+          </div>
+          <button class="primary">この設定で生成画面へ</button>
+          <div class="card kv" style="margin-top:10px">
+            <span>Model</span><div>amanatsuIllustrious_v2</div>
+            <span>Seed</span><div>2918843301</div>
+            <span>Sampler</span><div>Euler a · 28 step · CFG 5</div>
+            <span>Size</span><div>832×1216</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑥ ワイルドカード -->
+    <div>
+      <div class="screen-label">⑥ ワイルドカード編集</div>
+      <div class="phone">
+        <div class="top"><div class="title">Wildcards</div><div class="status" style="color:var(--accent)">＋ 新規</div></div>
+        <div class="scroll" style="padding-bottom:80px">
+          <div class="crumb">wildcards / <b>cosplay.txt</b></div>
+          <div class="card lines">
+            <div class="line"><span class="ln">1</span><span>maid outfit</span><span class="x">⋯</span></div>
+            <div class="line"><span class="ln">2</span><span>nurse, <span class="w-up1">white</span> uniform</span><span class="x">⋯</span></div>
+            <div class="line editing"><span class="ln">3</span><span><span class="dyn">{witch<b>|</b>wizard}</span> hat, cape<span class="caret"></span></span></div>
+            <div class="line"><span class="ln">4</span><span>shrine maiden, <span class="wild">__color__</span> hakama</span><span class="x">⋯</span></div>
+            <div class="line"><span class="ln">5</span><span><span class="paren">(</span>bunny suit<span class="paren">:</span><span class="num">0.9</span><span class="paren">)</span></span><span class="x">⋯</span></div>
+            <div class="line" style="color:var(--muted)"><span class="ln"></span><span>＋ 行を追加</span></div>
+          </div>
+          <div class="card dice">
+            <div class="h"><span>展開プレビュー</span><b>🎲 振り直す</b></div>
+            <ul><li>witch hat, cape</li><li>shrine maiden, crimson hakama</li><li>maid outfit</li></ul>
+          </div>
+          <div class="label">ほかのファイル</div>
+          <div class="card wlist">
+            <div class="witem"><span class="ic">▸</span>background/<span class="cnt">6 files</span></div>
+            <div class="witem"><span class="ic">▸</span>chara/<span class="cnt">12 files</span></div>
+            <div class="witem"><span class="ic">≡</span>angle.txt<span class="cnt">24 行</span></div>
+            <div class="witem"><span class="ic">≡</span>color.txt<span class="cnt">31 行</span></div>
+          </div>
+        </div>
+        <div class="nav"><div><b>✎</b>生成</div><div><b>▦</b>ギャラリー</div><div class="on"><b>✦</b>ワイルドカード</div></div>
+      </div>
+    </div>
+
+  </div>
+
+<script>
+  const phones = document.querySelectorAll(".phone");
+  function setA(a) {
+    phones.forEach((p) => { p.classList.remove("a-rose", "a-d1", "a-d2", "a-d3"); p.classList.add("a-" + a); });
+    document.querySelectorAll("[data-a]").forEach((b) => b.classList.toggle("on", b.dataset.a === a));
+  }
+  document.querySelectorAll("[data-a]").forEach((b) => b.addEventListener("click", () => setA(b.dataset.a)));
+  document.getElementById("trbtn").addEventListener("click", () => phones.forEach((p) => p.classList.toggle("show-tr")));
+  setA("d2");
+</script>
+</body>
+</html>

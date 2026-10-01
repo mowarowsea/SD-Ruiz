@@ -1,0 +1,46 @@
+@import "tailwindcss";
+
+/* Atelier テーマ (暖色寄りのダーク + くすんだローズ) */
+@theme {
+  --color-bg: #171214;
+  --color-surface: #221a1e;
+  --color-surface2: #2b2126;
+  --color-line: #3b2e34;
+  --color-ink: #f2e6ea;
+  --color-muted: #9b8a91;
+  --color-accent: #c99bab;
+  --color-accent-ink: #22101a;
+  --color-ok: #8fbf6a;
+  --color-danger: #e07a7a;
+
+  --font-sans: Inter, "Noto Sans JP", sans-serif;
+  --font-serif: "DM Serif Display", serif;
+  --font-mono: "JetBrains Mono", "Noto Sans JP", monospace;
+}
+
+html,
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 入力欄の共通スタイル */
+@utility field {
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  color: var(--color-ink);
+  outline: none;
+  &:focus {
+    border-color: var(--color-accent);
+  }
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
