@@ -1,7 +1,8 @@
 // プロンプトの入力補完 (タグ / ワイルドカード / LoRA)。挙動は tagcomplete の設定に合わせている
 
-import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
-import { api, loadLoras } from "../api";
+import { type Completion, type CompletionContext, type CompletionResult, startCompletion } from "@codemirror/autocomplete";
+import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
+import { api, loadLoras, type TagHit } from "../api";
 
 // アンダースコアを空白にしない顔文字系のタグ (tagcomplete の既定の除外リスト)
 const keepUnderscore = new Set(["0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3", "6_9", ">_o", "@_@", "^_^", "o_o", "u_u", "x_x", "|_|", "||_||"]);
@@ -64,8 +65,25 @@ function usedInDoc(ctx: CompletionContext, from: number) {
   };
 }
 
+type Option = Completion & { used?: boolean; translation?: string };
+
 /** 候補が同じ入力欄ですでに使われているか (補完の一覧で印を付ける) */
-export const isUsed = (c: Completion) => !!(c as Completion & { used?: boolean }).used;
+export const isUsed = (c: Completion) => !!(c as Option).used;
+
+/** 補完の一覧で、タグ名の隣に訳を出す */
+export const translationColumn = {
+  position: 60,
+  render(c: Completion) {
+    const tr = (c as Option).translation;
+    if (tr === undefined) return null;
+    const el = document.createElement("span");
+    el.className = tr ? "cm-completionTr" : "cm-completionTr cm-completionTr-none";
+    el.textContent = tr || "訳なし";
+    return el;
+  },
+};
+
+const hasJapanese = (s: string) => /[^\x00-\x7f]/.test(s);
 
 /** 補完の後ろに区切りの ", " を付ける (すでに続いていれば付けない) */
 function withComma(view: { state: { doc: { sliceString(a: number, b: number): string } } }, to: number) {
@@ -108,7 +126,8 @@ async function loraSource(ctx: CompletionContext): Promise<CompletionResult | nu
 async function tagSource(ctx: CompletionContext): Promise<CompletionResult | null> {
   // 直前の区切り (カンマや括弧など) から後ろを 1 つのタグとして扱う
   const m = ctx.matchBefore(/[^\s,()[\]{}|<>:\\][^,()[\]{}|<>:\n]*$/);
-  if (!m || (m.text.length < 2 && !ctx.explicit)) return null;
+  // 日本語なら訳から引く (逆引き) ので 1 文字から出す
+  if (!m || (m.text.length < 2 && !ctx.explicit && !hasJapanese(m.text))) return null;
   // 重みの数値や <lora:...> の中では出さない
   if (/^[\d.\s]+$/.test(m.text)) return null;
   const line = ctx.state.doc.lineAt(ctx.pos);
@@ -124,9 +143,10 @@ async function tagSource(ctx: CompletionContext): Promise<CompletionResult | nul
     from: m.from,
     filter: false,
     options: tags.map(
-      (t): Completion & { used: boolean } => ({
+      (t): Option => ({
         label: tagToPrompt(t.name),
-        detail: [t.alias && `← ${t.alias}`, t.translation, formatCount(t.count)].filter(Boolean).join("  "),
+        detail: [t.alias && `← ${t.alias}`, formatCount(t.count)].filter(Boolean).join("  "),
+        translation: t.translation ?? "",
         type: `tag-${t.category}`,
         used: used.tag(t.name),
         apply: (view, _c, from, to) => {
@@ -138,7 +158,104 @@ async function tagSource(ctx: CompletionContext): Promise<CompletionResult | nul
   };
 }
 
-/** カーソル直前の書きかけに応じて補完の種類を切り替える */
+// ---- 範囲選択したタグの訳 ----
+
+/** タグの区切り */
+const delimiter = /[,()[\]{}|<>\n]/;
+
+/** 選択範囲を、両端のタグの切れ目まで広げる (単語の途中から選んでもタグ全体を引く) */
+function expandToTags(doc: string, from: number, to: number) {
+  while (from > 0 && !delimiter.test(doc[from - 1])) from--;
+  while (to < doc.length && !delimiter.test(doc[to])) to++;
+  return doc.slice(from, to);
+}
+
+/** 範囲の中のタグを書いた順に取り出す。LoRA・ワイルドカード・重み・変数は除く */
+export function tagsIn(text: string) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  // エスケープした括弧 \( \) で切らないよう、いったん別の文字に逃がしてから区切る
+  const parts = text
+    .replace(/<[^>\n]*>?|__[\w\-/*.!]+?__|\$\{[\w-]+(?:=!?|\})/g, ",") // LoRA・ワイルドカード・${name= と ${name}
+    .replace(/\\\(/g, "\u0001")
+    .replace(/\\\)/g, "\u0002")
+    .split(delimiter);
+  for (const part of parts) {
+    const t = part
+      .replace(/:\s*-?[\d.]*\s*$/, "") // :1.2 の重み
+      .replace(/\u0001/g, "(")
+      .replace(/\u0002/g, ")")
+      .replace(/\\(.)/g, "$1")
+      .trim();
+    if (!/[a-z]/i.test(t) && !hasJapanese(t)) continue; // 記号だけ
+    if (/^(BREAK|AND)$/.test(t)) continue;
+    const key = normalize(t);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+/** 訳を直す (補完の一覧で選んだとき)。保存したら一覧を出し直す */
+async function editTranslation(view: EditorView, t: TagHit) {
+  const text = prompt(`${tagToPrompt(t.name)} の訳 (空にすると辞書の訳に戻す)`, t.translation ?? "");
+  view.focus();
+  if (text === null) return;
+  try {
+    await api.setTranslation(t.name, text);
+  } catch (e) {
+    alert((e as Error).message);
+  }
+  startCompletion(view);
+}
+
+async function selectionSource(ctx: CompletionContext): Promise<CompletionResult | null> {
+  const sel = ctx.state.selection.main;
+  const names = tagsIn(expandToTags(ctx.state.doc.toString(), sel.from, sel.to));
+  if (!names.length) return null;
+  const { tags } = await api.lookupTags(names.slice(0, 200)).catch(() => ({ tags: [] as TagHit[] }));
+  if (ctx.aborted || !tags.length) return null;
+  return {
+    from: sel.from,
+    to: sel.to,
+    filter: false,
+    options: tags.map(
+      (t, i): Option => ({
+        label: tagToPrompt(t.name),
+        detail: [t.alias && `← ${tagToPrompt(t.alias)}`, t.edited && "✎", !t.unknown && formatCount(t.count)].filter(Boolean).join("  "),
+        translation: t.translation ?? "",
+        type: `tag-${t.category}`,
+        section: { name: "選択した範囲の訳 (タップで訳を直す)", rank: 0 },
+        boost: -i,
+        apply: (view) => void editTranslation(view, t),
+      }),
+    ),
+  };
+}
+
+/** カーソル直前の書きかけに応じて補完の種類を切り替える。範囲を選んでいるときは、その中のタグの訳を出す */
 export async function promptCompletion(ctx: CompletionContext): Promise<CompletionResult | null> {
+  if (!ctx.state.selection.main.empty) return ctx.explicit ? selectionSource(ctx) : null;
   return (await wildcardSource(ctx)) ?? (await loraSource(ctx)) ?? (await tagSource(ctx));
 }
+
+/** 範囲を選び終えたら (少し待って選択が動かなければ) 訳の一覧を出す */
+export const translateSelection = ViewPlugin.fromClass(
+  class {
+    timer = 0;
+    constructor(readonly view: EditorView) {}
+    update(u: ViewUpdate) {
+      if (!u.selectionSet || u.docChanged) return;
+      clearTimeout(this.timer);
+      const sel = u.state.selection.main;
+      if (sel.empty || !u.view.hasFocus) return;
+      this.timer = window.setTimeout(() => {
+        if (this.view.state.selection.main.eq(sel)) startCompletion(this.view);
+      }, 350);
+    }
+    destroy() {
+      clearTimeout(this.timer);
+    }
+  },
+);

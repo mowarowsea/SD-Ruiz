@@ -82,6 +82,10 @@ export interface TagHit {
   count: number;
   alias?: string;
   translation?: string;
+  /** 訳を自分で直したもの */
+  edited?: boolean;
+  /** タグの CSV に無い語 */
+  unknown?: boolean;
 }
 
 export interface Lora {
@@ -187,6 +191,11 @@ export const api = {
   interrupt: () => post<{ ok: boolean }>("/api/interrupt", {}),
   job: () => request<JobState>("/api/job"),
   tags: (q: string, signal?: AbortSignal) => request<{ tags: TagHit[] }>(`/api/tags?q=${encodeURIComponent(q)}`, { signal }),
+  lookupTags: (names: string[], signal?: AbortSignal) =>
+    request<{ tags: TagHit[] }>("/api/tags/lookup", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ names }), signal }),
+  translations: (q: string, edited: boolean) => request<{ tags: TagHit[]; total: number }>(`/api/tags/translations?q=${encodeURIComponent(q)}&edited=${edited ? 1 : 0}`),
+  setTranslation: (name: string, text: string) =>
+    request<{ tag: TagHit }>("/api/tags/translation", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, text }) }),
   wildcards: () => request<{ wildcards: string[] }>("/api/wildcards"),
   loras: () => request<{ loras: Lora[] }>("/api/loras"),
   prefs: () => request<Prefs>("/api/prefs"),

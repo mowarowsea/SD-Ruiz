@@ -3,7 +3,7 @@ import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers as lineNumbersExt, placeholder as placeholderExt, tooltips } from "@codemirror/view";
 import { useEffect, useRef } from "react";
-import { isUsed, promptCompletion } from "../prompt/complete";
+import { isUsed, promptCompletion, translateSelection, translationColumn } from "../prompt/complete";
 import { promptHighlight } from "../prompt/highlight";
 import { promptStructure } from "../prompt/structure";
 
@@ -63,7 +63,8 @@ export function PromptEditor({
           placeholderExt(placeholder ?? ""),
           promptHighlight,
           promptStructure,
-          autocompletion({ override: [promptCompletion], icons: false, activateOnTypingDelay: 0, optionClass: (c) => `cm-opt-${c.type ?? ""}${isUsed(c) ? " cm-opt-used" : ""}` }),
+          translateSelection,
+          autocompletion({ override: [promptCompletion], icons: false, activateOnTypingDelay: 0, addToOptions: [translationColumn], optionClass: (c) => `cm-opt-${c.type ?? ""}${isUsed(c) ? " cm-opt-used" : ""}` }),
           // 補完の候補が入力欄の枠で切れないように body 直下に出す
           tooltips({ parent: document.body }),
           theme,

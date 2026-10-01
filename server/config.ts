@@ -10,8 +10,8 @@ export interface Config {
   forgeDir: string | null;
   /** a1111-sd-webui-tagcomplete の tags/ にあるタグ CSV */
   tagFile: string;
-  /** タグの和訳 CSV (`tag,訳` 形式、tags/ からの相対パス)。任意 */
-  translationFile: string | null;
+  /** タグの和訳 CSV (`tag,訳` 形式、tags/ からの相対パス)。後ろのファイルが優先。無いファイルは飛ばす */
+  translationFiles: string[];
   /** ギャラリーの grid / 単体画像のフォルダ (IIB から見たパス)。未設定なら IIB の追加パスを grid とそれ以外に分けて使う */
   gridFolders: string[] | null;
   imageFolders: string[] | null;
@@ -31,7 +31,7 @@ const defaults: Config = {
   forgeUrl: "http://127.0.0.1:7862",
   forgeDir: null,
   tagFile: "danbooru.csv",
-  translationFile: null,
+  translationFiles: ["danbooru-machine-jp.csv", "danbooru-jp.csv"],
   gridFolders: null,
   imageFolders: null,
   trashDir: null,

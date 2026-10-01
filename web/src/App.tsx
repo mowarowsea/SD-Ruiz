@@ -7,6 +7,7 @@ import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
 import { CleanupPage } from "./pages/CleanupPage";
 import { ForgePage } from "./pages/ForgePage";
+import { TranslationsPage } from "./pages/TranslationsPage";
 import { WildcardsPage } from "./pages/WildcardsPage";
 
 export function App() {
@@ -100,6 +101,7 @@ export function App() {
             <WildcardsPage />
           </div>
         )}
+        {nav.tab === "translations" && <TranslationsPage />}
         {nav.tab === "forge" && <ForgePage status={status} starting={starting} launcher={launcher} onChanged={refreshStatus} />}
       </main>
 

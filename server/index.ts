@@ -26,7 +26,7 @@ const gallery = new Gallery(cfg.forgeUrl, {
   trashDir: cfg.trashDir,
   savedDir: cfg.savedDir,
 });
-const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
+const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFiles);
 const wildcards = new Wildcards(cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards"), () => gallery.trashDir());
 const launcher = new Launcher(cfg.launcherUrl?.replace(/\/+$/, "") ?? null, cfg.launcherServiceId);
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
@@ -122,6 +122,16 @@ server.get("/api/meta", async () => {
 server.get<{ Querystring: { q?: string; limit?: string } }>("/api/tags", async (req) => ({
   tags: tags.search(req.query.q ?? "", Math.min(Number(req.query.limit) || 20, 50)),
 }));
+
+// プロンプトに書いた語の訳 (補完の窓で範囲選択したときに出す)
+server.post<{ Body: { names?: string[] } }>("/api/tags/lookup", async (req) => ({ tags: tags.lookup((req.body.names ?? []).slice(0, 200)) }));
+
+// 訳の一覧と編集 (自分で直した訳は data/translations.csv)
+server.get<{ Querystring: { q?: string; edited?: string } }>("/api/tags/translations", async (req) => ({
+  tags: tags.translations(req.query.q ?? "", req.query.edited === "1"),
+  total: tags.translationCount,
+}));
+server.put<{ Body: { name?: string; text?: string } }>("/api/tags/translation", async (req) => ({ tag: tags.setTranslation(req.body.name ?? "", req.body.text ?? "") }));
 
 // ワイルドカードと LoRA は数が少ないので一覧を返してフロントで絞り込む
 server.get("/api/wildcards", async () => ({ wildcards: (await wildcards.list()).map((w) => w.name) }));
@@ -340,4 +350,4 @@ if (existsSync(dist)) {
 
 await server.listen({ port: cfg.port, host: cfg.host });
 server.log.info(`Forge: ${cfg.forgeUrl}`);
-server.log.info(cfg.forgeDir ? `タグ ${tags.size} 件を読み込みました` : "forgeDir が未設定なのでタグ補完は無効です");
+server.log.info(cfg.forgeDir ? `タグ ${tags.size} 件・訳 ${tags.translationCount} 件を読み込みました` : "forgeDir が未設定なのでタグ補完は無効です");
