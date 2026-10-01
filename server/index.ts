@@ -8,10 +8,13 @@ import { loadConfig } from "./config.js";
 import { TagDictionary, listWildcards } from "./dictionary.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
+import { SidecarCache, thumbnail } from "./library.js";
+import { PrefsStore } from "./prefs.js";
 
 const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
+const prefs = new PrefsStore();
 const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
 const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
@@ -32,12 +35,35 @@ server.setErrorHandler((err, _req, reply) => {
 // LocalLauncher のヘルスチェック用。SD-Ruiz 自体が動いていれば 200 (Forge の状態は body で返す)
 server.get("/api/health", async () => ({ ok: true, forge: await forge.status() }));
 
+// Checkpoint / LoRA の実ファイルの場所 (サムネイルを引くのに使う)。一覧を取るたびに更新する
+const checkpointPaths = new Map<string, string>();
+const loraPaths = new Map<string, string>();
+const sidecars = new SidecarCache();
+
+async function fetchModels() {
+  const models = await forge.models();
+  checkpointPaths.clear();
+  for (const m of models) checkpointPaths.set(m.title, m.filename);
+  return models;
+}
+
+async function fetchLoras() {
+  const loras = await forge.loras();
+  loraPaths.clear();
+  for (const l of loras) loraPaths.set(l.name, l.path);
+  return loras;
+}
+
 // 生成画面の選択肢 (Checkpoint / Sampler / Scheduler) をまとめて返す
 server.get("/api/meta", async () => {
-  const [models, current, samplers, schedulers] = await Promise.all([forge.models(), forge.currentCheckpoint(), forge.samplers(), forge.schedulers()]);
+  sidecars.clear();
+  const [models, current, samplers, schedulers] = await Promise.all([fetchModels(), forge.currentCheckpoint(), forge.samplers(), forge.schedulers()]);
   return {
     current,
-    models: models.map((m) => ({ title: m.title, name: m.model_name, filename: m.filename })),
+    models: models.map((m) => {
+      const sc = sidecars.get(m.filename);
+      return { title: m.title, name: m.model_name, base: sc.base, preview: !!sc.preview };
+    }),
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
   };
@@ -52,17 +78,50 @@ server.get<{ Querystring: { q?: string; limit?: string } }>("/api/tags", async (
 server.get("/api/wildcards", async () => ({ wildcards: await listWildcards(wildcardsDir) }));
 
 server.get("/api/loras", async () => {
-  const loras = await forge.loras();
+  const loras = await fetchLoras();
   const root = /[\\/]models[\\/]Lora[\\/]/i;
   return {
     loras: loras
       .map((l) => {
         const rel = l.path.split(root).pop() ?? l.name;
-        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/") };
+        const sc = sidecars.get(l.path);
+        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/"), base: sc.base, trainedWords: sc.trainedWords, preview: !!sc.preview };
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
 });
+
+// プレビュー画像の縮小版
+server.get<{ Params: { kind: string }; Querystring: { id: string } }>("/api/thumb/:kind", async (req, reply) => {
+  const { kind } = req.params;
+  if (kind !== "checkpoint" && kind !== "lora") return reply.code(404).send({ error: "not found" });
+  const paths = kind === "checkpoint" ? checkpointPaths : loraPaths;
+  if (!paths.size) await (kind === "checkpoint" ? fetchModels() : fetchLoras());
+  const file = paths.get(req.query.id);
+  const preview = file && sidecars.get(file).preview;
+  if (!preview) return reply.code(404).send({ error: "プレビューがありません" });
+  return reply.type("image/webp").header("cache-control", "private, max-age=604800").send(await thumbnail(preview));
+});
+
+// 端末をまたいで共有する設定
+server.get("/api/prefs", async () => prefs.value);
+
+server.put<{ Body: { kind: "checkpoint" | "lora"; id: string; on: boolean } }>(
+  "/api/prefs/favorite",
+  {
+    schema: {
+      body: {
+        type: "object",
+        required: ["kind", "id", "on"],
+        properties: { kind: { enum: ["checkpoint", "lora"] }, id: { type: "string" }, on: { type: "boolean" } },
+      },
+    },
+  },
+  async (req) => {
+    prefs.setFavorite(req.body.kind, req.body.id, req.body.on);
+    return prefs.value;
+  },
+);
 
 const generateSchema = {
   body: {
@@ -88,6 +147,7 @@ const generateSchema = {
 
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {
   const job = jobs.start(req.body);
+  prefs.recordGenerate(req.body);
   return { id: job.id };
 });
 

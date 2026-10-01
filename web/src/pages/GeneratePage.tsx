@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
-import { api, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import { api, baseLabel, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
+import { LoraChips } from "../components/LoraChips";
+import { LoraSheet } from "../components/LoraSheet";
+import { BaseBadge, Thumb } from "../components/Thumb";
+import { addLora, findLoras, removeLora } from "../prompt/lora";
 import { PromptEditor } from "../components/PromptEditor";
 import { ParamsAccordion } from "../components/ParamsAccordion";
 import { ResultView } from "../components/ResultView";
-import { useJob, usePersistentState } from "../hooks";
+import { useJob, usePersistentState, usePrefs } from "../hooks";
 
 const defaults: GenerateParams = {
   checkpoint: "",
@@ -25,7 +29,28 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
   const [form, setForm] = usePersistentState("ruiz.generate", defaults);
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
   const { job, progress, refresh } = useJob();
-  const [sheet, setSheet] = useState(false);
+  const { prefs, reload: reloadPrefs, setFavorite } = usePrefs();
+  const [sheet, setSheet] = useState<"checkpoint" | "lora" | null>(null);
+  const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
+  const model = meta?.models.find((m) => m.title === form.checkpoint);
+
+  // モデルを切り替えたら、そのモデルで最後に使ったパラメータに戻す
+  const [restored, setRestored] = useState<string | null>(null);
+  const selectCheckpoint = (checkpoint: string) => {
+    const saved = prefs?.modelParams[checkpoint];
+    patch({ checkpoint, ...saved });
+    setRestored(saved ? `前回の設定に戻しました: ${saved.width}×${saved.height} · ${saved.steps}st · CFG ${saved.cfg} · ${saved.sampler}` : null);
+  };
+  useEffect(() => {
+    if (!restored) return;
+    const t = setTimeout(() => setRestored(null), 4000);
+    return () => clearTimeout(t);
+  }, [restored]);
+
+  const toggleLora = (name: string) => {
+    const use = findLoras(form.prompt).find((u) => u.name === name);
+    patch({ prompt: use ? removeLora(form.prompt, use) : addLora(form.prompt, name) });
+  };
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // 未選択 or 消えたモデルなら Forge 側で現在選ばれているものに合わせる
@@ -43,6 +68,7 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
     try {
       await api.generate(form);
       refresh();
+      void reloadPrefs();
     } catch (e) {
       setSubmitError((e as Error).message);
     }
@@ -52,17 +78,23 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
 
   return (
     <div className="pb-44">
-      <button onClick={() => setSheet(true)} className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-3 text-left" disabled={!meta}>
-        <div className="size-11 flex-none rounded-xl bg-gradient-to-br from-accent/70 to-surface2" />
+      <button onClick={() => setSheet("checkpoint")} className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-2.5 text-left" disabled={!meta}>
+        <Thumb kind="checkpoint" id={form.checkpoint} has={!!model?.preview} className="size-14 flex-none rounded-xl" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">{form.checkpoint ? modelLabel(form.checkpoint) : "Checkpoint を選択"}</div>
-          <div className="truncate text-[11px] text-muted">{form.checkpoint ? modelFolder(form.checkpoint) : meta ? "" : "読み込み中…"}</div>
+          <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted">
+            <BaseBadge label={baseLabel(model?.base ?? null)} className="bg-surface2 text-muted" />
+            <span className="truncate">{form.checkpoint ? modelFolder(form.checkpoint) : meta ? "" : "読み込み中…"}</span>
+          </div>
         </div>
         <span className="text-lg text-muted">›</span>
       </button>
 
+      {restored && <p className="mt-2 px-1 text-[11px] text-accent">{restored}</p>}
+
       <Label>Prompt</Label>
       <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" />
+      <LoraChips prompt={form.prompt} onChange={(prompt) => patch({ prompt })} onAdd={() => setSheet("lora")} />
 
       <Label>Negative</Label>
       <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" />
@@ -97,7 +129,25 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
         </div>
       </div>
 
-      {meta && <CheckpointSheet open={sheet} onClose={() => setSheet(false)} models={meta.models} value={form.checkpoint} onSelect={(checkpoint) => patch({ checkpoint })} />}
+      {meta && (
+        <CheckpointSheet
+          open={sheet === "checkpoint"}
+          onClose={() => setSheet(null)}
+          models={meta.models}
+          value={form.checkpoint}
+          prefs={prefs}
+          onSelect={selectCheckpoint}
+          onFavorite={(id, on) => setFavorite("checkpoint", id, on)}
+        />
+      )}
+      <LoraSheet
+        open={sheet === "lora"}
+        onClose={() => setSheet(null)}
+        used={usedLoras}
+        prefs={prefs}
+        onToggle={(l) => toggleLora(l.name)}
+        onFavorite={(id, on) => setFavorite("lora", id, on)}
+      />
     </div>
   );
 }

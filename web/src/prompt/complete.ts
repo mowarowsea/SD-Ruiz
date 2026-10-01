@@ -1,7 +1,7 @@
 // プロンプトの入力補完 (タグ / ワイルドカード / LoRA)。挙動は tagcomplete の設定に合わせている
 
 import type { Completion, CompletionContext, CompletionResult } from "@codemirror/autocomplete";
-import { api, type Lora } from "../api";
+import { api, loadLoras } from "../api";
 
 // アンダースコアを空白にしない顔文字系のタグ (tagcomplete の既定の除外リスト)
 const keepUnderscore = new Set(["0_0", "(o)_(o)", "+_+", "+_-", "._.", "<o>_<o>", "<|>_<|>", "=_=", ">_<", "3_3", "6_9", ">_o", "@_@", "^_^", "o_o", "u_u", "x_x", "|_|", "||_||"]);
@@ -18,9 +18,8 @@ function formatCount(n: number) {
   return String(n);
 }
 
-// ワイルドカードと LoRA の一覧はページを開いている間キャッシュする (失敗したら次回取り直す)
+// ワイルドカードの一覧はページを開いている間キャッシュする (失敗したら次回取り直す)
 let wildcardsCache: Promise<string[]> | null = null;
-let lorasCache: Promise<Lora[]> | null = null;
 const wildcards = () =>
   (wildcardsCache ??= api
     .wildcards()
@@ -29,14 +28,7 @@ const wildcards = () =>
       wildcardsCache = null;
       throw e;
     }));
-const loras = () =>
-  (lorasCache ??= api
-    .loras()
-    .then((r) => r.loras)
-    .catch((e) => {
-      lorasCache = null;
-      throw e;
-    }));
+const loras = loadLoras;
 
 /** 補完の後ろに区切りの ", " を付ける (すでに続いていれば付けない) */
 function withComma(view: { state: { doc: { sliceString(a: number, b: number): string } } }, to: number) {

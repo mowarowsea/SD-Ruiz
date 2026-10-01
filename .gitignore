@@ -12,3 +12,6 @@ __pycache__/
 .claude/
 config.json
 web/dist/
+
+data/
+cache/

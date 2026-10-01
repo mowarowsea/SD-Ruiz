@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ForgeStatus, type JobState } from "./api";
+import { api, type ForgeStatus, type JobState, type Prefs } from "./api";
 
 /** localStorage に保存される state。読み書きに失敗しても (プライベートモード等) 普通の state として動く */
 export function usePersistentState<T extends object>(key: string, initial: T) {
@@ -73,4 +73,21 @@ export function useJob() {
   }, [poll]);
 
   return { ...state, refresh: poll };
+}
+
+/** 端末をまたいで共有する設定 (お気に入り・最近使ったモデル・モデルごとのパラメータ) */
+export function usePrefs() {
+  const [prefs, setPrefs] = useState<Prefs | null>(null);
+  const reload = useCallback(() => api.prefs().then(setPrefs, () => {}), []);
+  useEffect(() => void reload(), [reload]);
+  const setFavorite = useCallback((kind: "checkpoint" | "lora", id: string, on: boolean) => {
+    // 先に見た目だけ切り替えておく
+    setPrefs((p) => {
+      if (!p) return p;
+      const key = kind === "checkpoint" ? "favoriteCheckpoints" : "favoriteLoras";
+      return { ...p, [key]: on ? [...p[key], id] : p[key].filter((x) => x !== id) };
+    });
+    api.setFavorite(kind, id, on).then(setPrefs, () => void reload());
+  }, [reload]);
+  return { prefs, reload, setFavorite };
 }

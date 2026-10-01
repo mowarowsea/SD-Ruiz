@@ -156,3 +156,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .cm-opt-tag-5 .cm-completionLabel { color: #e8c27a; }
 .cm-opt-wildcard .cm-completionLabel { color: #8fcfc0; }
 .cm-opt-lora .cm-completionLabel { color: #b9c9e6; }
+
+/* キーボード操作時のフォーカス枠をテーマ色に */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
