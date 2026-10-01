@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { faCircleInfo } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { api, type CleanupPreview, formatBytes } from "../api";
 
 const startOfToday = () => {
@@ -8,8 +10,8 @@ const startOfToday = () => {
 };
 
 /**
- * 整理: タグ (Like など) の付いていない grid と画像をまとめてゴミ箱フォルダへ移す。
- * タグ付きの grid の元画像や、タグ付きの画像を含む grid は残る。ゴミ箱を空にするまでは元に戻せる
+ * 整理: タグの付いていない grid と画像をまとめてゴミ箱フォルダへ移す。
+ * タグを付けたものは保管庫にあるので対象外。ゴミ箱を空にするまでは元に戻せる
  */
 export function CleanupPage() {
   const [keepToday, setKeepToday] = useState(true);
@@ -31,63 +33,53 @@ export function CleanupPage() {
   }, [keepToday]);
   useEffect(() => void refresh(), [refresh]);
 
-  const run = async () => {
+  const act = async (label: string, fn: () => Promise<string>) => {
+    setBusy(label);
+    setMessage(null);
+    try {
+      setMessage({ text: await fn() });
+    } catch (e) {
+      setMessage({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(null);
+      void refresh();
+    }
+  };
+
+  const run = () => {
     if (!preview || !confirm(`タグの付いていない grid ${preview.grids.toLocaleString()} 枚と画像 ${preview.images.toLocaleString()} 枚をゴミ箱フォルダへ移します。よろしいですか？`)) return;
-    setBusy("移動中…");
-    setMessage(null);
-    try {
+    void act("移動中…", async () => {
       const r = await api.cleanupRun(keepSince());
-      setMessage({ text: `${r.moved.toLocaleString()} 件 (${formatBytes(r.bytes)}) をゴミ箱フォルダへ移しました` });
-    } catch (e) {
-      setMessage({ text: (e as Error).message, error: true });
-    } finally {
-      setBusy(null);
-      void refresh();
-    }
+      return `${r.moved.toLocaleString()} 件 (${formatBytes(r.bytes)}) をゴミ箱フォルダへ移しました`;
+    });
   };
 
-  const migrate = async () => {
-    if (!preview || !confirm(`Like 付きの grid ${preview.likedGrids} 枚と画像 ${preview.likedImages} 枚 (grid の元画像を含む) を保管庫へ移します。よろしいですか？`)) return;
-    setBusy("移動中…");
-    setMessage(null);
-    try {
-      const r = await api.migrateLiked();
-      setMessage({ text: `${r.moved.toLocaleString()} 件を保管庫へ移しました` });
-    } catch (e) {
-      setMessage({ text: (e as Error).message, error: true });
-    } finally {
-      setBusy(null);
-      void refresh();
-    }
+  const migrate = () => {
+    if (!preview || !confirm(`タグ付きの grid ${preview.taggedGrids} 枚と画像 ${preview.taggedImages} 枚を、元画像ごと保管庫へ移します。よろしいですか？`)) return;
+    void act("移動中…", async () => `${(await api.migrateTagged()).moved.toLocaleString()} 件を保管庫へ移しました`);
   };
 
-  const empty = async () => {
+  const empty = () => {
     if (!trash || !confirm(`ゴミ箱フォルダの ${trash.files.toLocaleString()} 件 (${formatBytes(trash.bytes)}) を完全に削除します。元に戻せません。よろしいですか？`)) return;
-    setBusy("削除中…");
-    setMessage(null);
-    try {
+    void act("削除中…", async () => {
       await api.emptyTrash();
-      setMessage({ text: "ゴミ箱を空にしました" });
-    } catch (e) {
-      setMessage({ text: (e as Error).message, error: true });
-    } finally {
-      setBusy(null);
-      void refresh();
-    }
+      return "ゴミ箱を空にしました";
+    });
   };
 
   return (
     <div className="pb-24">
-      <h1 className="mb-1 text-xl font-semibold">整理</h1>
-      <p className="mb-4 text-xs leading-relaxed text-muted">
-        タグが付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。Like したものは保管庫 (Saved) にあるので対象外です。ほかのタグ付きの grid の元画像と、タグ付きの画像を含む grid も残ります。
-      </p>
+      <Heading as="h1" info="タグの付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。タグを付けたもの (Like / useful / temp など) は保管庫 (Saved) にあるので対象外です。ゴミ箱を空にするまでは元に戻せます。">
+        整理
+      </Heading>
 
-      {preview && preview.likedGrids + preview.likedImages > 0 && (
+      {preview && preview.taggedGrids + preview.taggedImages > 0 && (
         <section className="mb-4 rounded-2xl border border-accent/50 bg-surface p-4">
-          <h2 className="mb-1 text-sm font-semibold">保管庫へ移していない Like</h2>
-          <p className="mb-3 text-xs leading-relaxed text-muted">
-            出力フォルダに Like 付きの grid {preview.likedGrids} 枚・画像 {preview.likedImages} 枚が残っています (IIB で Like したもの)。元画像ごと保管庫へ移せます。
+          <Heading info="保管庫を使う前に IIB でタグを付けたものが、出力フォルダに残っています。grid は元画像ごと、タグも付けたまま保管庫へ移せます。">
+            出力フォルダに残っているタグ付き
+          </Heading>
+          <p className="mb-3 text-sm">
+            grid {preview.taggedGrids} 枚 · 画像 {preview.taggedImages} 枚
           </p>
           <button onClick={migrate} disabled={!!busy} className="w-full rounded-xl border border-accent py-2.5 text-sm text-accent disabled:opacity-40">
             保管庫へ移す
@@ -102,19 +94,15 @@ export function CleanupPage() {
         </label>
         {preview ? (
           <dl className="mb-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-muted">移す grid</dt>
+            <dt>移す grid</dt>
             <dd>{preview.grids.toLocaleString()} 枚</dd>
-            <dt className="text-muted">移す画像</dt>
+            <dt>移す画像</dt>
             <dd>{preview.images.toLocaleString()} 枚</dd>
-            <dt className="text-muted">合計</dt>
+            <dt>合計</dt>
             <dd>{formatBytes(preview.bytes)}</dd>
-            <dt className="text-muted">残る</dt>
-            <dd>
-              grid {preview.keptGrids.toLocaleString()} / 画像 {preview.keptImages.toLocaleString()}
-            </dd>
           </dl>
         ) : (
-          <p className="mb-4 text-sm text-muted">数えています…</p>
+          <p className="mb-4 text-sm">数えています…</p>
         )}
         <button onClick={run} disabled={!preview || !!busy || preview.grids + preview.images === 0} className="w-full rounded-xl bg-accent py-2.5 text-sm text-accent-ink disabled:opacity-40">
           {busy ?? "ゴミ箱フォルダへ移す"}
@@ -122,21 +110,35 @@ export function CleanupPage() {
       </section>
 
       <section className="rounded-2xl border border-line bg-surface p-4">
-        <h2 className="mb-1 text-sm font-semibold">ゴミ箱フォルダ</h2>
+        <Heading info={`場所: ${trash?.dir ?? "…"}\n「ゴミ箱を空にする」で完全に削除します。`}>ゴミ箱フォルダ</Heading>
         {trash && (
-          <>
-            <p className="mb-1 font-mono text-[10px] break-all text-muted">{trash.dir}</p>
-            <p className="mb-3 text-sm">
-              {trash.files.toLocaleString()} 件 · {formatBytes(trash.bytes)}
-            </p>
-          </>
+          <p className="mb-3 text-sm">
+            {trash.files.toLocaleString()} 件 · {formatBytes(trash.bytes)}
+          </p>
         )}
         <button onClick={empty} disabled={!trash?.files || !!busy} className="w-full rounded-xl border border-danger/60 py-2.5 text-sm text-danger disabled:opacity-40">
           ゴミ箱を空にする (完全に削除)
         </button>
       </section>
 
-      {message && <p className={`mt-3 text-xs break-words ${message.error ? "text-danger" : "text-accent"}`}>{message.text}</p>}
+      {message && <p className={`mt-3 text-sm break-words ${message.error ? "text-danger" : "text-accent"}`}>{message.text}</p>}
+    </div>
+  );
+}
+
+/** 見出しと (i)。説明は (i) を押したときだけ出す */
+function Heading({ as = "h2", info, children }: { as?: "h1" | "h2"; info: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const H = as;
+  return (
+    <div className={as === "h1" ? "mb-4" : "mb-2"}>
+      <div className="flex items-center gap-2">
+        <H className={as === "h1" ? "text-xl font-semibold" : "text-sm font-semibold"}>{children}</H>
+        <button onClick={() => setOpen((v) => !v)} aria-label="説明" className={`text-sm ${open ? "text-accent" : "text-muted"}`}>
+          <FontAwesomeIcon icon={faCircleInfo} />
+        </button>
+      </div>
+      {open && <p className="mt-2 rounded-lg bg-surface2 px-3 py-2 text-xs leading-relaxed break-all whitespace-pre-line">{info}</p>}
     </div>
   );
 }

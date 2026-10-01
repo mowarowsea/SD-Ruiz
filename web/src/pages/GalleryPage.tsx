@@ -3,7 +3,7 @@ import { api, type GalleryFile, type GalleryKind, type GalleryTag, type Generate
 import { GalleryViewer } from "../components/GalleryViewer";
 import { usePersistentState } from "../hooks";
 
-type TagFilter = number | "none" | null;
+type TagFilter = number | "none" | "any" | null;
 
 const dayKey = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 
@@ -125,6 +125,7 @@ export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; 
   const today = dayKey(Date.now());
   const chips: { id: TagFilter; label: string }[] = [
     { id: null, label: "すべて" },
+    { id: "any", label: "タグあり" },
     ...tags.map((t) => ({ id: t.id, label: t.name === "like" ? "♥ Like" : t.name })),
     { id: "none", label: "タグなし" },
   ];

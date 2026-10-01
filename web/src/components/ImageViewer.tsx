@@ -1,9 +1,11 @@
+import { faXmark } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useEffect, useRef } from "react";
 
 /**
  * 全画面の画像ビューア (Forge に入れていた改造と同じ操作)
  * - 画面の左右 25% をタップ: 前 / 次の画像
- * - 真ん中をタップ: 閉じる
+ * - 真ん中をタップ / 右上の ×: 閉じる
  * - キーボード: ← → で送り、Esc で閉じる。スマホの「戻る」でも閉じる
  *
  * loop: 端まで行ったら反対側に戻る (生成結果用)。ギャラリーのように続きを読み込む一覧では false にする
@@ -78,6 +80,13 @@ export function ImageViewer({
       <button className="absolute inset-y-0 left-1/4 w-1/2 cursor-zoom-out" aria-label="閉じる" onClick={close} />
       <button className="absolute inset-y-0 right-0 w-1/4 cursor-e-resize" aria-label="次の画像" onClick={() => (count > 1 ? step(1) : close())} />
       {overlay}
+      <button
+        onClick={close}
+        aria-label="閉じる"
+        className="absolute top-[max(0.5rem,env(safe-area-inset-top))] right-3 flex size-6 items-center justify-center rounded-full bg-black/50 text-white/80"
+      >
+        <FontAwesomeIcon icon={faXmark} className="text-sm" />
+      </button>
     </div>
   );
 }

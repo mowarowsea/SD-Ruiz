@@ -120,7 +120,7 @@ server.get<{ Querystring: { kind: Kind; offset?: number; tag?: string; q?: strin
   { schema: { querystring: { type: "object", required: ["kind"], properties: { kind: kindSchema, offset: { type: "integer", minimum: 0 }, tag: { type: "string" }, q: { type: "string" } } } } },
   async (req) => {
     const { kind, offset = 0, tag, q } = req.query;
-    return gallery.list({ kind, offset, limit: 90, tag: tag === "none" ? "none" : tag ? Number(tag) : undefined, q: q?.trim() || undefined });
+    return gallery.list({ kind, offset, limit: 90, tag: tag === "none" || tag === "any" ? tag : tag ? Number(tag) : undefined, q: q?.trim() || undefined });
   },
 );
 
@@ -143,12 +143,12 @@ const cleanupBody = { type: "object", required: ["keepSince"], properties: { kee
 
 server.post<{ Body: { keepSince: number } }>("/api/cleanup/preview", { schema: { body: cleanupBody } }, async (req) => {
   const t = await gallery.cleanupTargets(req.body.keepSince);
-  const liked = await gallery.likedInOutput();
-  return { grids: t.grids.length, images: t.images.length, bytes: t.bytes, keptGrids: t.keptGrids, keptImages: t.keptImages, likedGrids: liked.grids.length, likedImages: liked.images.length };
+  const tagged = await gallery.taggedInOutput();
+  return { grids: t.grids.length, images: t.images.length, bytes: t.bytes, keptGrids: t.keptGrids, keptImages: t.keptImages, taggedGrids: tagged.grids.length, taggedImages: tagged.images.length };
 });
 
-// 出力フォルダに残っている Like 付き (IIB のタグで Like していた分) を保管庫へ
-server.post("/api/cleanup/migrate-liked", async () => gallery.migrateLiked());
+// 出力フォルダに残っているタグ付き (保管庫を使う前に IIB で付けた分) を保管庫へ
+server.post("/api/cleanup/migrate-tagged", async () => gallery.migrateTagged());
 
 server.post<{ Body: { keepSince: number } }>("/api/cleanup/run", { schema: { body: cleanupBody } }, async (req) => gallery.cleanup(req.body.keepSince));
 

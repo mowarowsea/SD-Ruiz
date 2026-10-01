@@ -1,17 +1,17 @@
 // ギャラリー
 //
 // - ファイル一覧: 出力フォルダ (grid / 単体画像) を直接読む (IIB の検索 API は重く、ページ送りで重複も出るため)
-// - タグ: IIB の DB (iib.db) を読み取り専用で参照し、付け外しは IIB の API で行う (IIB / IIB Manager と共有される)
+// - 出力フォルダのタグ: IIB の DB (iib.db) を読み取り専用で参照する (保管庫を使う前に IIB で付けた分)
 // - サムネイル・生成情報・プロンプト検索: IIB の API
 // - 削除・整理: SD-Ruiz のゴミ箱フォルダへ移動する (完全に消すのは「ゴミ箱を空にする」だけ)
-// - 保管庫 (Saved): Like したものを移しておくフォルダ (Forge の「Save」ボタンの保存先と同じ)。整理の対象にはならない。
-//   ここにあるものは Like 扱い。Like を外すと出力フォルダへ戻す。
+// - 保管庫 (Saved): タグ (Like / useful / temp など) を付けたものを移しておくフォルダ (Forge の「Save」ボタンの保存先と同じ)。
+//   整理の対象にはならない。タグが全部外れたら出力フォルダへ戻す。保管庫のタグは保管庫の中の JSON に持つ (IIB では付けられないため)
 //   名前は Forge の Save に合わせ、grid は "2026-10-01_grid-0020.jpg"、元画像は "<grid の名前>_<元の名前>"
 //
 // grid の元画像は「1 つ前の grid から、この grid までの間に保存された単体画像」とみなす (Forge は単体画像を書いたあとに grid を書く)。
 // バッチ 1 の生成 (grid なし) を取り違えないよう、grid との時間差と Seed でも絞る。
 
-import { closeSync, existsSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -143,6 +143,43 @@ class FolderScanner {
   }
 }
 
+/**
+ * 保管庫のタグ。保管庫は IIB のスキャン対象外でタグを付けられないので、保管庫の中の JSON に持つ
+ * (ファイル名 → タグ ID)。記録の無いもの (Forge の Save で保存した分) は Like とみなす
+ */
+class SavedTags {
+  private file: string;
+  private data: Record<string, number[]>;
+
+  constructor(dir: string) {
+    this.file = join(dir, ".sd-ruiz-tags.json");
+    try {
+      this.data = JSON.parse(readFileSync(this.file, "utf8"));
+    } catch {
+      this.data = {};
+    }
+  }
+
+  get(name: string): number[] | undefined {
+    return this.data[key(name)];
+  }
+
+  set(name: string, ids: number[]) {
+    this.data[key(name)] = [...new Set(ids)];
+    this.write();
+  }
+
+  delete(name: string) {
+    if (!(key(name) in this.data)) return;
+    delete this.data[key(name)];
+    this.write();
+  }
+
+  private write() {
+    writeFileSync(this.file, JSON.stringify(this.data, null, 1));
+  }
+}
+
 export class Gallery {
   private readonly iib: string;
   private folders: { grid: string[]; image: string[] } | null = null;
@@ -253,15 +290,18 @@ export class Gallery {
     return this.tags().all;
   }
 
-  private likeTag() {
-    return this.tags().all.find((t) => t.name === "like") ?? null;
+  private savedTagStore: SavedTags | null = null;
+  private async savedTags() {
+    return (this.savedTagStore ??= new SavedTags(await this.savedDir()));
   }
 
-  /** ファイルのタグ。保管庫にあるものは Like が付いている扱い */
-  tagsOf(path: string, saved = false) {
-    const tags = this.tags().map.get(key(path)) ?? [];
-    const like = saved && this.likeTag();
-    return like ? [like, ...tags.filter((t) => t.id !== like.id)] : tags;
+  /** ファイルのタグ。出力フォルダのものは IIB、保管庫のものは保管庫の記録 (記録が無ければ Like) */
+  tagsOf(path: string, saved = false): CustomTag[] {
+    const all = this.tags().all;
+    if (!saved) return this.tags().map.get(key(path)) ?? [];
+    const ids = this.savedTagStore?.get(basename(path));
+    if (!ids) return all.filter((t) => t.name === "like");
+    return all.filter((t) => ids.includes(t.id));
   }
 
   // ---- 一覧 ----
@@ -275,6 +315,7 @@ export class Gallery {
   /** 保管庫の中身を grid・単体画像・grid ごとの元画像に分ける */
   private async savedIndex() {
     const dir = await this.savedDir();
+    await this.savedTags();
     const all = (await this.scanner.scan([dir])).map((f) => ({ ...f, saved: true }));
     const grids = all.filter((f) => isGridName(f.name));
     const images = all.filter((f) => !isGridName(f.name));
@@ -309,10 +350,11 @@ export class Gallery {
    * 新しい順に 1 ページ分。tag: カスタムタグ ID か "none" (タグなし)。q: プロンプトの部分一致
    * cursor は「何件目から」
    */
-  async list(opts: { kind: Kind; offset: number; limit: number; tag?: number | "none"; q?: string }) {
+  async list(opts: { kind: Kind; offset: number; limit: number; tag?: number | "none" | "any"; q?: string }) {
     let files = await this.allFiles(opts.kind);
     const tagsOf = (f: GalleryFile) => this.tagsOf(f.path, f.saved);
     if (opts.tag === "none") files = files.filter((f) => tagsOf(f).length === 0);
+    else if (opts.tag === "any") files = files.filter((f) => tagsOf(f).length > 0);
     else if (opts.tag !== undefined) files = files.filter((f) => tagsOf(f).some((t) => t.id === opts.tag));
     if (opts.q) {
       const q = opts.q.toLowerCase();
@@ -438,36 +480,39 @@ export class Gallery {
 
   /**
    * タグの付け外し。grid のときは元画像にも同じように付け外しする
-   * Like は保管庫への出し入れになる (付けると grid と元画像を保管庫へ移し、外すと出力フォルダへ戻す)。
+   * - 出力フォルダのものにタグを付けると、grid と元画像を保管庫へ移す
+   * - 保管庫のもののタグが全部外れたら、出力フォルダへ戻す
    * 付け外し後の状態 (移した先・タグ・元画像) を file で返す
    */
   async toggleTag(path: string, tagId: number) {
     const saved = await this.isSaved(path);
     const paths = [path, ...(await this.sources(path)).map((s) => s.path)];
-    if (tagId === this.likeTag()?.id) {
-      const file = saved ? await this.unsave(path, paths) : await this.save(path, paths);
-      return { on: !saved, count: paths.length, file };
+    const current = this.tagsOf(path, saved).map((t) => t.id);
+    const on = !current.includes(tagId);
+    const next = on ? [...current, tagId] : current.filter((id) => id !== tagId);
+    let file: GalleryFile;
+    if (saved) {
+      if (next.length) {
+        const store = await this.savedTags();
+        for (const p of paths) store.set(basename(p), next);
+        file = await this.fileAt(path, true);
+      } else file = await this.unsave(path, paths);
+    } else if (on) file = await this.save(path, paths, next);
+    else {
+      // 出力フォルダに残っている IIB のタグを外す (保管庫を使う前に付けた分)
+      await this.post("/db/batch_update_image_tag", { img_paths: paths, action: "remove", tag_id: tagId });
+      this.patchTags(paths, tagId, false);
+      file = await this.fileAt(path, false);
     }
-    const on = !this.tagsOf(path).some((t) => t.id === tagId);
-    await this.post("/db/batch_update_image_tag", { img_paths: paths, action: on ? "add" : "remove", tag_id: tagId });
-    this.patchTags(paths, tagId, on);
-    return { on, count: paths.length, file: await this.fileAt(path, saved) };
+    return { on, count: paths.length, file };
   }
 
   // ---- 保管庫への出し入れ ----
 
-  /** ファイルを移し、付いていたタグを移動先にも付け直す (Like は保管庫にあること自体で表すので付けない) */
-  private async relocate(moves: { from: string; to: string }[]) {
-    const like = this.likeTag();
-    const retag = new Map<number, string[]>();
+  private relocate(moves: { from: string; to: string }[]) {
     for (const { from, to } of moves) {
       mkdirSync(dirname(to), { recursive: true });
       renameSync(from, to);
-      for (const t of this.tagsOf(from)) if (t.id !== like?.id) retag.set(t.id, [...(retag.get(t.id) ?? []), to]);
-    }
-    for (const [tag_id, img_paths] of retag) {
-      await this.post("/db/batch_update_image_tag", { img_paths, action: "add", tag_id }).catch(() => {});
-      this.patchTags(img_paths, tag_id, true);
     }
   }
 
@@ -478,8 +523,8 @@ export class Gallery {
     return { path, name: basename(path), mtime: s.mtimeMs, bytes: s.size, saved, grid, sources, tags: this.tagsOf(path, saved) };
   }
 
-  /** 出力フォルダ → 保管庫。paths[0] が本体 (grid なら続きが元画像) */
-  private async save(path: string, paths: string[]) {
+  /** 出力フォルダ → 保管庫。paths[0] が本体 (grid なら続きが元画像)。tagIds を保管庫側のタグとして記録する */
+  private async save(path: string, paths: string[], tagIds: number[]) {
     const f = await this.getFolders();
     const dir = await this.savedDir();
     const root = [...f.grid, ...f.image].find((r) => under(path, r));
@@ -487,7 +532,9 @@ export class Gallery {
     // "2026-10-01\grid-0020.jpg" → "2026-10-01_grid-0020.jpg"
     const main = freePath(dir, relative(root, path).replace(/[\\/]/g, "_"));
     const moves = [{ from: path, to: main }, ...paths.slice(1).map((p) => ({ from: p, to: freePath(dir, `${basename(main)}_${basename(p)}`) }))];
-    await this.relocate(moves);
+    this.relocate(moves);
+    const store = await this.savedTags();
+    for (const m of moves) store.set(basename(m.to), tagIds);
     return this.fileAt(main, true);
   }
 
@@ -512,38 +559,40 @@ export class Gallery {
       const orig = name.startsWith(parent) ? name.slice(parent.length) : name;
       moves.push({ from: p, to: place(f.image[0], day, orig) });
     }
-    // 出力フォルダに Like のタグが残っていれば外す (戻した途端に Like 扱いにならないように)
-    const like = this.likeTag();
-    await this.relocate(moves);
-    if (like) {
-      await this.post("/db/batch_update_image_tag", { img_paths: moves.map((m) => m.to), action: "remove", tag_id: like.id }).catch(() => {});
-      this.patchTags(moves.map((m) => m.to), like.id, false);
+    this.relocate(moves);
+    const store = await this.savedTags();
+    for (const m of moves) store.delete(basename(m.from));
+    // 戻した先に IIB のタグが残っていれば外す (戻した途端にタグ付き扱いにならないように)
+    for (const t of this.customTags()) {
+      const hit = moves.map((m) => m.to).filter((p) => this.tagsOf(p).some((x) => x.id === t.id));
+      if (!hit.length) continue;
+      await this.post("/db/batch_update_image_tag", { img_paths: hit, action: "remove", tag_id: t.id }).catch(() => {});
+      this.patchTags(hit, t.id, false);
     }
     return this.fileAt(main, false);
   }
 
-  /** 出力フォルダで IIB の Like が付いているものをまとめて保管庫へ (Like の付け方を変える前の分) */
-  async likedInOutput() {
+  /** 出力フォルダで IIB のタグが付いているもの (保管庫を使う前に付けた分) */
+  async taggedInOutput() {
     this.invalidateTags();
-    const like = this.likeTag();
-    if (!like) return { grids: [], images: [] };
-    const has = (f: GalleryFile) => this.tagsOf(f.path).some((t) => t.id === like.id);
+    const has = (f: GalleryFile) => this.tagsOf(f.path).length > 0;
     return { grids: (await this.files("grid")).filter(has), images: (await this.files("image")).filter(has) };
   }
 
-  async migrateLiked() {
-    const { grids, images } = await this.likedInOutput();
+  /** taggedInOutput() をタグごと保管庫へ移す (grid は元画像ごと) */
+  async migrateTagged() {
+    const { grids, images } = await this.taggedInOutput();
     const done = new Set<string>();
     let moved = 0;
     for (const g of grids) {
       const paths = [g.path, ...(await this.sources(g.path)).map((s) => s.path)];
-      await this.save(g.path, paths);
+      await this.save(g.path, paths, this.tagsOf(g.path).map((t) => t.id));
       paths.forEach((p) => done.add(key(p)));
       moved += paths.length;
     }
     for (const img of images) {
       if (done.has(key(img.path)) || !existsSync(img.path)) continue;
-      await this.save(img.path, [img.path]);
+      await this.save(img.path, [img.path], this.tagsOf(img.path).map((t) => t.id));
       moved++;
     }
     return { moved };
@@ -561,7 +610,8 @@ export class Gallery {
 
   private async moveToTrash(paths: string[], label: string) {
     const f = await this.getFolders();
-    const roots = [...f.grid, ...f.image, await this.savedDir()];
+    const saved = await this.savedDir();
+    const roots = [...f.grid, ...f.image, saved];
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const dest = join(await this.trashDir(), `${stamp}-${label}`);
     let moved = 0;
@@ -574,6 +624,7 @@ export class Gallery {
         const size = statSync(p).size;
         mkdirSync(dirname(to), { recursive: true });
         renameSync(p, to);
+        if (root === saved) (await this.savedTags()).delete(basename(p));
         moved++;
         bytes += size;
       } catch {
