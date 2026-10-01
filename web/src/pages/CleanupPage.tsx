@@ -1,7 +1,6 @@
-import { faCircleInfo } from "@fortawesome/free-solid-svg-icons";
-import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api, type CleanupPreview, formatBytes } from "../api";
+import { Heading } from "../components/Heading";
 
 const startOfToday = () => {
   const d = new Date();
@@ -10,7 +9,7 @@ const startOfToday = () => {
 };
 
 /**
- * 整理: タグの付いていない grid と画像をまとめてゴミ箱フォルダへ移す。
+ * ギャラリー整理: タグの付いていない grid と画像をまとめてゴミ箱フォルダへ移す。
  * タグを付けたものは保管庫にあるので対象外。ゴミ箱を空にするまでは元に戻せる
  */
 export function CleanupPage() {
@@ -70,7 +69,7 @@ export function CleanupPage() {
   return (
     <div className="pb-24">
       <Heading as="h1" info="タグの付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。タグを付けたもの (Like / useful / temp など) は保管庫 (Saved) にあるので対象外です。ゴミ箱を空にするまでは元に戻せます。">
-        整理
+        ギャラリー整理
       </Heading>
 
       {preview && preview.taggedGrids + preview.taggedImages > 0 && (
@@ -122,23 +121,6 @@ export function CleanupPage() {
       </section>
 
       {message && <p className={`mt-3 text-sm break-words ${message.error ? "text-danger" : "text-accent"}`}>{message.text}</p>}
-    </div>
-  );
-}
-
-/** 見出しと (i)。説明は (i) を押したときだけ出す */
-function Heading({ as = "h2", info, children }: { as?: "h1" | "h2"; info: string; children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const H = as;
-  return (
-    <div className={as === "h1" ? "mb-4" : "mb-2"}>
-      <div className="flex items-center gap-2">
-        <H className={as === "h1" ? "text-xl font-semibold" : "text-sm font-semibold"}>{children}</H>
-        <button onClick={() => setOpen((v) => !v)} aria-label="説明" className={`text-sm ${open ? "text-accent" : "text-muted"}`}>
-          <FontAwesomeIcon icon={faCircleInfo} />
-        </button>
-      </div>
-      {open && <p className="mt-2 rounded-lg bg-surface2 px-3 py-2 text-xs leading-relaxed break-all whitespace-pre-line">{info}</p>}
     </div>
   );
 }

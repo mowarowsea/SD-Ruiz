@@ -1,7 +1,7 @@
 import { autocompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, placeholder as placeholderExt, tooltips } from "@codemirror/view";
+import { EditorView, keymap, lineNumbers as lineNumbersExt, placeholder as placeholderExt, tooltips } from "@codemirror/view";
 import { useEffect, useRef } from "react";
 import { promptCompletion } from "../prompt/complete";
 import { promptHighlight } from "../prompt/highlight";
@@ -14,6 +14,8 @@ const theme = EditorView.theme(
     ".cm-content": { padding: "0", caretColor: "var(--color-accent)" },
     ".cm-line": { padding: "0" },
     ".cm-cursor": { borderLeftColor: "var(--color-accent)", borderLeftWidth: "2px" },
+    ".cm-gutters": { backgroundColor: "transparent", border: "none", color: "var(--color-muted)", opacity: "0.55" },
+    ".cm-lineNumbers .cm-gutterElement": { padding: "0 10px 0 0", minWidth: "2ch" },
     ".cm-placeholder": { color: "var(--color-muted)", opacity: "0.6" },
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "rgba(201,155,171,0.3) !important" },
   },
@@ -27,6 +29,7 @@ export function PromptEditor({
   placeholder,
   minHeight,
   readOnly = false,
+  lineNumbers = false,
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -34,6 +37,8 @@ export function PromptEditor({
   minHeight?: string;
   /** 表示専用 (ギャラリーの生成情報など)。ハイライトだけ効かせる */
   readOnly?: boolean;
+  /** 行番号を出す (1 行が 1 つの候補になるワイルドカードの編集用) */
+  lineNumbers?: boolean;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
@@ -47,6 +52,7 @@ export function PromptEditor({
         doc: value,
         extensions: [
           ...(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
+          ...(lineNumbers ? [lineNumbersExt()] : []),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.lineWrapping,

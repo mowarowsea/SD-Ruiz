@@ -4,5 +4,7 @@
   "forgeUrl": "http://127.0.0.1:7862",
   "forgeDir": "C:/path/to/Stable Diffusion WebUI Forge - Neo",
   "tagFile": "danbooru.csv",
-  "translationFile": null
+  "translationFile": null,
+  "launcherUrl": "http://127.0.0.1:8765",
+  "launcherServiceId": "sd-forge-neo"
 }

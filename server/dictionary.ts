@@ -1,8 +1,7 @@
-// プロンプト補完の材料: tagcomplete のタグ CSV と Dynamic Prompts のワイルドカード
+// プロンプト補完の材料: tagcomplete のタグ CSV
 
 import { existsSync, readFileSync } from "node:fs";
-import { readdir } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
+import { join } from "node:path";
 
 export interface Tag {
   name: string;
@@ -83,14 +82,4 @@ export class TagDictionary {
     if (q.length >= 3) for (const t of this.tags) if (t.name.includes(q)) add(t);
     return hits;
   }
-}
-
-/** wildcards/ 以下の .txt を `chara/foo` のような名前で列挙する */
-export async function listWildcards(dir: string | null): Promise<string[]> {
-  if (!dir || !existsSync(dir)) return [];
-  const entries = await readdir(dir, { recursive: true, withFileTypes: true });
-  return entries
-    .filter((e) => e.isFile() && e.name.endsWith(".txt"))
-    .map((e) => relative(dir, join(e.parentPath, e.name)).split(sep).join("/").replace(/\.txt$/, ""))
-    .sort();
 }

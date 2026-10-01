@@ -7,6 +7,42 @@ export type ForgeStatus =
 export interface Health {
   ok: boolean;
   forge: ForgeStatus;
+  /** 起動を頼んでから、まだ応答が無い */
+  starting: boolean;
+  /** LocalLauncher 経由で起動できる */
+  launcher: boolean;
+}
+
+export interface Finding {
+  id: string;
+  title: string;
+  level: "crash" | "warn" | "info";
+  cause: string;
+  remedy: string;
+  evidence: string[];
+}
+
+export interface ForgeSession {
+  label: string;
+  startedAt: number;
+  endedAt: number | null;
+  end: "running" | "exited" | "restarted" | "stopped";
+  findings: Finding[];
+  tail: string[];
+}
+
+export interface Diagnosis {
+  status: ForgeStatus;
+  logError: string | null;
+  sessions: ForgeSession[];
+  memory: { ramTotal: number; ramFree: number; commitLimit: number; commitFree: number; forgePid: number | null; forgeBytes: number | null; top: { name: string; pid: number; bytes: number }[] } | null;
+  warnings: Finding[];
+}
+
+export interface WildcardFile {
+  name: string;
+  entries: number;
+  mtime: number;
 }
 
 export interface Model {
@@ -173,6 +209,16 @@ export const api = {
   trash: () => request<{ dir: string; files: number; bytes: number }>("/api/trash"),
   emptyTrash: () => post<{ ok: boolean }>("/api/trash/empty", {}),
   imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,
+  forgeStart: () => post<{ pid: number }>("/api/forge/start", {}),
+  forgeRestart: () => post<{ pid: number }>("/api/forge/restart", {}),
+  forgeDiagnose: () => request<Diagnosis>("/api/forge/diagnose"),
+  wildcardFiles: () => request<{ files: WildcardFile[] }>("/api/wildcards/files"),
+  wildcardFile: (name: string) => request<{ name: string; text: string; mtime: number }>(`/api/wildcards/file?name=${encodeURIComponent(name)}`),
+  /** mtime は開いたときの更新日時 (ほかで書き換えられていたら失敗する)。null なら新規作成 */
+  saveWildcard: (name: string, text: string, mtime: number | null) =>
+    request<{ name: string; mtime: number; entries: number }>("/api/wildcards/file", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, text, mtime }) }),
+  renameWildcard: (from: string, to: string) => post<{ name: string }>("/api/wildcards/rename", { from, to }),
+  deleteWildcard: (name: string) => post<{ ok: boolean }>("/api/wildcards/delete", { name }),
 };
 
 /** "sd\\anime\\foo_v2.safetensors" → "foo_v2" */

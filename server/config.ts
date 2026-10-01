@@ -19,6 +19,10 @@ export interface Config {
   trashDir: string | null;
   /** 保管庫 (Like したものを移すフォルダ)。未設定なら単体画像フォルダの実体の隣の Saved (Forge の「Save」の保存先) */
   savedDir: string | null;
+  /** LocalLauncher の URL。Forge の起動・再起動と、診断に使うログの取得を頼む (未設定なら起動ボタンなし) */
+  launcherUrl: string | null;
+  /** LocalLauncher の config.yaml での Forge Neo のサービス ID */
+  launcherServiceId: string;
 }
 
 const defaults: Config = {
@@ -32,6 +36,8 @@ const defaults: Config = {
   imageFolders: null,
   trashDir: null,
   savedDir: null,
+  launcherUrl: "http://127.0.0.1:8765",
+  launcherServiceId: "sd-forge-neo",
 };
 
 // config.json (git 管理外) があれば defaults を上書きする

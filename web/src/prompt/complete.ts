@@ -30,6 +30,11 @@ const wildcards = () =>
     }));
 const loras = loadLoras;
 
+/** ワイルドカードを作った・消したあとに、補完の一覧を取り直させる */
+export function invalidateWildcards() {
+  wildcardsCache = null;
+}
+
 /** 補完の後ろに区切りの ", " を付ける (すでに続いていれば付けない) */
 function withComma(view: { state: { doc: { sliceString(a: number, b: number): string } } }, to: number) {
   const next = view.state.doc.sliceString(to, to + 1);

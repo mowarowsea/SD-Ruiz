@@ -1,15 +1,18 @@
-import { faBroom, faImages, faPuzzlePiece, faStar, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
+import { faBroom, faHeartPulse, faImages, faPuzzlePiece, faShuffle, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { type MouseEvent, useState } from "react";
 import { MenuItem, PopMenu } from "./PopMenu";
 
 /** 画面。cleanup などのおまけ機能は Extras メニューから開く */
-export type Tab = "generate" | "gallery" | "cleanup";
+export type Tab = "generate" | "gallery" | "cleanup" | "wildcards" | "forge";
+export const tabs: Tab[] = ["generate", "gallery", "cleanup", "wildcards", "forge"];
 
-const extras: { id: Tab | null; icon: IconDefinition; label: string; description: string }[] = [
-  { id: "cleanup", icon: faBroom, label: "整理", description: "タグの付いていない grid と画像を片付ける" },
-  { id: null, icon: faStar, label: "ワイルドカード", description: "準備中" },
+/** id が null のものは準備中 */
+const extras: { id: Tab | null; icon: IconDefinition; label: string }[] = [
+  { id: "cleanup", icon: faBroom, label: "ギャラリー整理" },
+  { id: "wildcards", icon: faShuffle, label: "ワイルドカード" },
+  { id: "forge", icon: faHeartPulse, label: "Forge 起動・診断" },
 ];
 
 export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
@@ -19,7 +22,7 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
   return (
     <>
       {menu && (
-        <PopMenu anchor={menu} onClose={() => setMenu(null)} width={256}>
+        <PopMenu anchor={menu} onClose={() => setMenu(null)} width={220}>
           {extras.map((it) => (
             <MenuItem
               key={it.label}
@@ -31,10 +34,8 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
               }}
             >
               <FontAwesomeIcon icon={it.icon} className="w-4 text-accent" />
-              <div className="min-w-0">
-                <div>{it.label}</div>
-                <div className="text-[11px] text-muted">{it.description}</div>
-              </div>
+              {it.label}
+              {!it.id && <span className="ml-auto text-[11px] text-muted">準備中</span>}
             </MenuItem>
           ))}
         </PopMenu>

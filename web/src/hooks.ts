@@ -24,22 +24,24 @@ export function usePersistentState<T extends object>(key: string, initial: T) {
 /** Forge の状態を定期的に確認する */
 export function useForgeStatus(intervalMs = 10_000) {
   const [status, setStatus] = useState<ForgeStatus | null>(null);
+  const [starting, setStarting] = useState(false);
+  const [launcher, setLauncher] = useState(false);
   const [serverDown, setServerDown] = useState(false);
+  const check = useCallback(
+    () =>
+      api.health().then(
+        (h) => (setStatus(h.forge), setStarting(h.starting), setLauncher(h.launcher), setServerDown(false)),
+        () => setServerDown(true),
+      ),
+    [],
+  );
   useEffect(() => {
-    let alive = true;
-    const check = () =>
-      api
-        .health()
-        .then((h) => alive && (setStatus(h.forge), setServerDown(false)))
-        .catch(() => alive && setServerDown(true));
-    check();
-    const t = setInterval(check, intervalMs);
-    return () => {
-      alive = false;
-      clearInterval(t);
-    };
-  }, [intervalMs]);
-  return { status, serverDown };
+    void check();
+    // 起動待ちの間は早めに確認する
+    const t = setInterval(check, starting ? 3_000 : intervalMs);
+    return () => clearInterval(t);
+  }, [check, intervalMs, starting]);
+  return { status, starting, launcher, serverDown, refresh: check };
 }
 
 /**

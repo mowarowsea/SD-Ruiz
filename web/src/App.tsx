@@ -1,21 +1,31 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, type ForgeStatus, type GenerateParams, type Meta } from "./api";
 import { defaultForm, toForm } from "./form";
-import { BottomNav, type Tab } from "./components/BottomNav";
+import { BottomNav, type Tab, tabs } from "./components/BottomNav";
 import { useForgeStatus, useJob, usePersistentState } from "./hooks";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
 import { CleanupPage } from "./pages/CleanupPage";
+import { ForgePage } from "./pages/ForgePage";
+import { WildcardsPage } from "./pages/WildcardsPage";
 
 export function App() {
   const [nav, setNav] = usePersistentState<{ tab: Tab }>("ruiz.nav", { tab: "generate" });
   // 前のバージョンで保存した、今は無い画面
-  if (!["generate", "gallery", "cleanup"].includes(nav.tab)) nav.tab = "generate";
-  const { status, serverDown } = useForgeStatus();
+  if (!tabs.includes(nav.tab)) nav.tab = "generate";
+  const { status, starting, launcher, serverDown, refresh: refreshStatus } = useForgeStatus();
   const [meta, setMeta] = useState<Meta | null>(null);
   const jobState = useJob();
   const galleryOpened = useRef(false);
   if (nav.tab === "gallery") galleryOpened.current = true;
+  // ワイルドカードも編集中の内容を失わないよう保持する
+  const wildcardsOpened = useRef(false);
+  if (nav.tab === "wildcards") wildcardsOpened.current = true;
+  const [startError, setStartError] = useState<string | null>(null);
+  const startForge = () => {
+    setStartError(null);
+    api.forgeStart().then(refreshStatus, (e) => setStartError((e as Error).message));
+  };
   const [form, setForm] = useState<GenerateParams>(defaultForm);
 
   // 開いたときは「最後に成功した生成」の設定に戻す (生成中ならその設定)。PC でもスマホでも同じ状態になる
@@ -51,8 +61,29 @@ export function App() {
       <main className="mx-auto max-w-xl px-4 pt-2">
         {serverDown ? (
           <Notice>SD-Ruiz サーバーに接続できません</Notice>
+        ) : starting ? (
+          <Notice tone="info">Forge を起動しています… (使えるようになるまで 1〜2 分)</Notice>
         ) : (
-          status && !status.online && <Notice>{forgeMessage(status)}</Notice>
+          status &&
+          !status.online &&
+          nav.tab !== "forge" && (
+            <Notice
+              actions={
+                <>
+                  {launcher && status.reason === "unreachable" && (
+                    <button onClick={startForge} className="rounded-lg bg-danger px-3 py-1 text-ink">
+                      起動
+                    </button>
+                  )}
+                  <button onClick={() => setNav({ tab: "forge" })} className="rounded-lg border border-danger/60 px-3 py-1">
+                    原因を見る
+                  </button>
+                </>
+              }
+            >
+              {startError ?? forgeMessage(status)}
+            </Notice>
+          )
         )}
         {/* 生成とギャラリーは一度開いたら保持しておく (入力中の内容やスクロール位置を失わない) */}
         <div hidden={nav.tab !== "generate"}>
@@ -64,6 +95,12 @@ export function App() {
           </div>
         )}
         {nav.tab === "cleanup" && <CleanupPage />}
+        {(nav.tab === "wildcards" || wildcardsOpened.current) && (
+          <div hidden={nav.tab !== "wildcards"}>
+            <WildcardsPage />
+          </div>
+        )}
+        {nav.tab === "forge" && <ForgePage status={status} starting={starting} launcher={launcher} onChanged={refreshStatus} />}
       </main>
 
       <BottomNav tab={nav.tab} onChange={(tab) => setNav({ tab })} />
@@ -89,6 +126,12 @@ function forgeMessage(status: Extract<ForgeStatus, { online: false }>) {
   }[status.reason];
 }
 
-function Notice({ children }: { children: string }) {
-  return <div className="mb-3 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-xs text-danger">{children}</div>;
+function Notice({ children, actions, tone = "error" }: { children: string; actions?: ReactNode; tone?: "error" | "info" }) {
+  const color = tone === "error" ? "border-danger/40 bg-danger/10 text-danger" : "border-accent/40 bg-accent/10 text-accent";
+  return (
+    <div className={`mb-3 flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${color}`}>
+      <span className="min-w-0 flex-1">{children}</span>
+      {actions && <div className="flex shrink-0 gap-1.5">{actions}</div>}
+    </div>
+  );
 }

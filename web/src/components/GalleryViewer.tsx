@@ -109,7 +109,7 @@ export function GalleryViewer({
   const remove = async () => {
     const n = file.sources?.length ?? 0;
     const extra = n ? ` と元画像 ${n} 枚` : "";
-    if (!confirm(`${file.name}${extra} をゴミ箱フォルダへ移しますか？\n(「整理」から空にするまでは元に戻せます)`)) return;
+    if (!confirm(`${file.name}${extra} をゴミ箱フォルダへ移しますか？\n(「ギャラリー整理」でゴミ箱を空にするまでは元に戻せます)`)) return;
     try {
       await api.deleteGalleryFile(file.path, kind);
       onDeleted(file);

@@ -5,12 +5,15 @@ import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { TagDictionary, listWildcards } from "./dictionary.js";
+import { TagDictionary } from "./dictionary.js";
+import { analyze, currentWarnings, windowsInfo } from "./forge-doctor.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
+import { Launcher } from "./launcher.js";
 import { SidecarCache, thumbnail } from "./library.js";
 import { PrefsStore } from "./prefs.js";
+import { Wildcards } from "./wildcards.js";
 
 const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
@@ -24,7 +27,8 @@ const gallery = new Gallery(cfg.forgeUrl, {
   savedDir: cfg.savedDir,
 });
 const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
-const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
+const wildcards = new Wildcards(cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards"), () => gallery.trashDir());
+const launcher = new Launcher(cfg.launcherUrl?.replace(/\/+$/, "") ?? null, cfg.launcherServiceId);
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
 
 // Tailscale 越しのスマホ向けに JS やタグ候補を圧縮して返す (画像は対象外)
@@ -41,7 +45,44 @@ server.setErrorHandler((err, _req, reply) => {
 });
 
 // LocalLauncher のヘルスチェック用。SD-Ruiz 自体が動いていれば 200 (Forge の状態は body で返す)
-server.get("/api/health", async () => ({ ok: true, forge: await forge.status() }));
+server.get("/api/health", async () => {
+  const status = await forge.status();
+  if (status.online) startRequestedAt = 0;
+  return { ok: true, forge: status, starting: !status.online && Date.now() - startRequestedAt < startTimeout, launcher: !!launcher.baseUrl };
+});
+
+// ---- Forge の起動と診断 ----
+
+// 起動を頼んでから応答するまで 1〜2 分かかる。その間に二重に起動しないよう覚えておく
+let startRequestedAt = 0;
+const startTimeout = 4 * 60_000;
+
+server.post("/api/forge/start", async (_req, reply) => {
+  if ((await forge.status()).online) return reply.code(409).send({ error: "Forge はもう動いています" });
+  if (Date.now() - startRequestedAt < startTimeout) return reply.code(409).send({ error: "起動中です。少し待ってください" });
+  const r = await launcher.start();
+  startRequestedAt = Date.now();
+  return r;
+});
+
+server.post("/api/forge/restart", async (_req, reply) => {
+  if (jobs.current?.status === "running") return reply.code(409).send({ error: "生成中です。終わってから再起動してください" });
+  const r = await launcher.restart();
+  startRequestedAt = Date.now();
+  return r;
+});
+
+// LocalLauncher のログを起動ごとに分け、どう終わったか・原因の見当を返す
+server.get("/api/forge/diagnose", async () => {
+  const [status, log, win] = await Promise.all([forge.status(), launcher.log().catch((e: Error) => e), windowsInfo(Number(new URL(cfg.forgeUrl).port || 80))]);
+  return {
+    status,
+    logError: log instanceof Error ? log.message : null,
+    sessions: log instanceof Error ? [] : analyze(log, status.online, win.events),
+    memory: win.memory,
+    warnings: currentWarnings(win.memory),
+  };
+});
 
 // Checkpoint / LoRA の実ファイルの場所 (サムネイルを引くのに使う)。一覧を取るたびに更新する
 const checkpointPaths = new Map<string, string>();
@@ -83,7 +124,31 @@ server.get<{ Querystring: { q?: string; limit?: string } }>("/api/tags", async (
 }));
 
 // ワイルドカードと LoRA は数が少ないので一覧を返してフロントで絞り込む
-server.get("/api/wildcards", async () => ({ wildcards: await listWildcards(wildcardsDir) }));
+server.get("/api/wildcards", async () => ({ wildcards: (await wildcards.list()).map((w) => w.name) }));
+
+// ---- ワイルドカードの編集 ----
+
+server.get("/api/wildcards/files", async () => ({ files: await wildcards.list() }));
+
+server.get<{ Querystring: { name: string } }>("/api/wildcards/file", async (req) => wildcards.read(req.query.name ?? ""));
+
+server.put<{ Body: { name: string; text: string; mtime: number | null } }>(
+  "/api/wildcards/file",
+  { schema: { body: { type: "object", required: ["name", "text", "mtime"], properties: { name: { type: "string" }, text: { type: "string" }, mtime: { type: ["number", "null"] } } } } },
+  async (req) => wildcards.write(req.body.name, req.body.text, req.body.mtime),
+);
+
+server.post<{ Body: { from: string; to: string } }>(
+  "/api/wildcards/rename",
+  { schema: { body: { type: "object", required: ["from", "to"], properties: { from: { type: "string" }, to: { type: "string" } } } } },
+  async (req) => wildcards.rename(req.body.from, req.body.to),
+);
+
+server.post<{ Body: { name: string } }>(
+  "/api/wildcards/delete",
+  { schema: { body: { type: "object", required: ["name"], properties: { name: { type: "string" } } } } },
+  async (req) => wildcards.remove(req.body.name),
+);
 
 server.get("/api/loras", async () => {
   const loras = await fetchLoras();
