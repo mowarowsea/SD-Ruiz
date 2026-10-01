@@ -17,6 +17,8 @@ export interface Config {
   imageFolders: string[] | null;
   /** 削除・整理で画像を移すフォルダ。未設定なら単体画像フォルダの実体の隣の SD-Ruiz-Trash */
   trashDir: string | null;
+  /** 保管庫 (Like したものを移すフォルダ)。未設定なら単体画像フォルダの実体の隣の Saved (Forge の「Save」の保存先) */
+  savedDir: string | null;
 }
 
 const defaults: Config = {
@@ -29,6 +31,7 @@ const defaults: Config = {
   gridFolders: null,
   imageFolders: null,
   trashDir: null,
+  savedDir: null,
 };
 
 // config.json (git 管理外) があれば defaults を上書きする

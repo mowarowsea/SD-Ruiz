@@ -46,6 +46,21 @@ export function CleanupPage({ onBack }: { onBack: () => void }) {
     }
   };
 
+  const migrate = async () => {
+    if (!preview || !confirm(`Like 付きの grid ${preview.likedGrids} 枚と画像 ${preview.likedImages} 枚 (grid の元画像を含む) を保管庫へ移します。よろしいですか？`)) return;
+    setBusy("移動中…");
+    setMessage(null);
+    try {
+      const r = await api.migrateLiked();
+      setMessage({ text: `${r.moved.toLocaleString()} 件を保管庫へ移しました` });
+    } catch (e) {
+      setMessage({ text: (e as Error).message, error: true });
+    } finally {
+      setBusy(null);
+      void refresh();
+    }
+  };
+
   const empty = async () => {
     if (!trash || !confirm(`ゴミ箱フォルダの ${trash.files.toLocaleString()} 件 (${formatBytes(trash.bytes)}) を完全に削除します。元に戻せません。よろしいですか？`)) return;
     setBusy("削除中…");
@@ -68,8 +83,20 @@ export function CleanupPage({ onBack }: { onBack: () => void }) {
       </button>
       <h1 className="mb-1 font-serif text-2xl">整理</h1>
       <p className="mb-4 text-xs leading-relaxed text-muted">
-        Like などのタグが付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。タグ付きの grid の元画像と、タグ付きの画像を含む grid は残ります。
+        タグが付いていない grid と画像を、まとめてゴミ箱フォルダへ移します。Like したものは保管庫 (Saved) にあるので対象外です。ほかのタグ付きの grid の元画像と、タグ付きの画像を含む grid も残ります。
       </p>
+
+      {preview && preview.likedGrids + preview.likedImages > 0 && (
+        <section className="mb-4 rounded-2xl border border-accent/50 bg-surface p-4">
+          <h2 className="mb-1 text-sm font-semibold">保管庫へ移していない Like</h2>
+          <p className="mb-3 text-xs leading-relaxed text-muted">
+            出力フォルダに Like 付きの grid {preview.likedGrids} 枚・画像 {preview.likedImages} 枚が残っています (IIB で Like したもの)。元画像ごと保管庫へ移せます。
+          </p>
+          <button onClick={migrate} disabled={!!busy} className="w-full rounded-xl border border-accent py-2.5 text-sm text-accent disabled:opacity-40">
+            保管庫へ移す
+          </button>
+        </section>
+      )}
 
       <section className="mb-4 rounded-2xl border border-line bg-surface p-4">
         <label className="mb-3 flex items-center gap-2 text-sm">

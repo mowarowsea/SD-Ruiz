@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
-import { api, baseLabel, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel } from "../api";
+import { api, baseLabel, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { LoraChips } from "../components/LoraChips";
 import { LoraSheet } from "../components/LoraSheet";
@@ -109,9 +109,7 @@ export function GeneratePage({
             <div className="flex gap-2">
               <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center font-serif text-lg">
                 <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
-                <span className="relative">
-                  生成中{progress && progress.steps > 0 ? ` ${progress.step} / ${progress.steps}` : "…"}
-                </span>
+                <span className="relative">{runningLabel(progress)}</span>
               </div>
               <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
                 中断
@@ -146,6 +144,13 @@ export function GeneratePage({
       />
     </div>
   );
+}
+
+/** 生成中のボタンの表示 (モデルの読み込み中はステップがまだ進まない) */
+function runningLabel(progress: Progress | null) {
+  if (!progress) return "生成中…";
+  if (progress.step === 0) return "モデルを準備中…";
+  return progress.steps > 0 ? `生成中 ${progress.step} / ${progress.steps}` : "生成中…";
 }
 
 function Label({ children }: { children: string }) {

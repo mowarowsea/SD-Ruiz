@@ -105,6 +105,8 @@ export interface GalleryFile {
   /** 更新日時 (ms) */
   mtime: number;
   bytes: number;
+  /** 保管庫 (Saved) にあるもの。Like 扱い */
+  saved?: boolean;
   tags?: GalleryTag[];
 }
 
@@ -121,6 +123,9 @@ export interface CleanupPreview {
   bytes: number;
   keptGrids: number;
   keptImages: number;
+  /** 出力フォルダに残っている Like 付き (保管庫へ移す前の分) */
+  likedGrids: number;
+  likedImages: number;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -155,11 +160,13 @@ export const api = {
   },
   galleryTags: () => request<{ tags: GalleryTag[] }>("/api/gallery/tags"),
   galleryInfo: (path: string, kind: GalleryKind) => request<GalleryInfo>(`/api/gallery/info?kind=${kind}&path=${encodeURIComponent(path)}`),
-  toggleGalleryTag: (path: string, kind: GalleryKind, tagId: number) => post<{ on: boolean; count: number }>("/api/gallery/tag", { path, kind, tagId }),
+  /** Like は保管庫への出し入れになり、移った先が file で返る */
+  toggleGalleryTag: (path: string, kind: GalleryKind, tagId: number) => post<{ on: boolean; count: number; file: GalleryFile | null }>("/api/gallery/tag", { path, kind, tagId }),
   deleteGalleryFile: (path: string, kind: GalleryKind) => post<{ moved: number; bytes: number }>("/api/gallery/delete", { path, kind }),
   galleryImageUrl: (f: GalleryFile, thumb: boolean) => `/api/gallery/image/${thumb ? "thumb" : "file"}?path=${encodeURIComponent(f.path)}&t=${Math.round(f.mtime)}`,
   cleanupPreview: (keepSince: number) => post<CleanupPreview>("/api/cleanup/preview", { keepSince }),
   cleanupRun: (keepSince: number) => post<{ moved: number; bytes: number }>("/api/cleanup/run", { keepSince }),
+  migrateLiked: () => post<{ moved: number }>("/api/cleanup/migrate-liked", {}),
   trash: () => request<{ dir: string; files: number; bytes: number }>("/api/trash"),
   emptyTrash: () => post<{ ok: boolean }>("/api/trash/empty", {}),
   imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,

@@ -6,7 +6,8 @@ import { PromptEditor } from "./PromptEditor";
 
 /**
  * ギャラリーの画像詳細。ビューアの操作 (左右で送る・真ん中で閉じる) に、下部の操作バーを重ねる。
- * grid のタグは元画像にも同じように付け外しされ、削除も元画像ごとゴミ箱フォルダへ移る
+ * grid のタグは元画像にも同じように付け外しされ、削除も元画像ごとゴミ箱フォルダへ移る。
+ * Like は保管庫 (Saved) への出し入れで、付けると grid と元画像が保管庫へ移る
  */
 export function GalleryViewer({
   kind,
@@ -15,7 +16,7 @@ export function GalleryViewer({
   onIndex,
   onClose,
   onNearEnd,
-  onTagsChanged,
+  onFileChanged,
   onDeleted,
   customTags,
   meta,
@@ -27,7 +28,8 @@ export function GalleryViewer({
   onIndex: (i: number) => void;
   onClose: () => void;
   onNearEnd: () => void;
-  onTagsChanged: (path: string, tags: GalleryTag[]) => void;
+  /** タグが変わった / 保管庫との間で移った (path は元の場所) */
+  onFileChanged: (path: string, file: GalleryFile) => void;
   onDeleted: (f: GalleryFile) => void;
   customTags: GalleryTag[];
   meta: Meta | null;
@@ -60,10 +62,16 @@ export function GalleryViewer({
   const toggleTag = async (t: GalleryTag) => {
     try {
       const r = await api.toggleGalleryTag(file.path, kind, t.id);
+      const extra = r.count > 1 ? ` (元画像 ${r.count - 1} 枚も)` : "";
+      if (r.file) {
+        // Like: 保管庫へ移した / 出力フォルダへ戻した。場所が変わったので詳細は取り直す
+        onFileChanged(file.path, r.file);
+        setMessage({ text: r.on ? `Like して保管庫へ移しました${extra}` : `Like を外して出力フォルダへ戻しました${extra}` });
+        return;
+      }
       const next = r.on ? [...tags.filter((x) => x.id !== t.id), t] : tags.filter((x) => x.id !== t.id);
       setInfos((m) => (m[file.path] ? { ...m, [file.path]: { ...m[file.path], tags: next } } : m));
-      onTagsChanged(file.path, next);
-      const extra = r.count > 1 ? ` (元画像 ${r.count - 1} 枚にも)` : "";
+      onFileChanged(file.path, { ...file, tags: next });
       setMessage({ text: `${t.name} を${r.on ? "付けました" : "外しました"}${extra}` });
     } catch (e) {
       setMessage({ text: (e as Error).message, error: true });
@@ -125,7 +133,8 @@ export function GalleryViewer({
       overlay={
         <>
           <div className="pointer-events-none absolute inset-x-0 top-[max(2rem,calc(env(safe-area-inset-top)+1.25rem))] text-center font-mono text-[10px] text-white/45">
-            {new Date(file.mtime).toLocaleString("sv-SE")} · {file.name}
+            {new Date(file.mtime).toLocaleString("sv-SE")} · {file.saved && "保管庫 · "}
+            {file.name}
           </div>
 
           {panel && (

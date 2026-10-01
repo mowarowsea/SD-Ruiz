@@ -181,7 +181,7 @@ export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; 
           onIndex={setViewing}
           onClose={() => setViewing(null)}
           onNearEnd={() => next !== null && load(next)}
-          onTagsChanged={(path, t) => setFiles((fs) => fs.map((f) => (f.path === path ? { ...f, tags: t } : f)))}
+          onFileChanged={(path, file) => setFiles((fs) => fs.map((f) => (f.path === path ? file : f)))}
           onDeleted={(f) => {
             const rest = files.filter((x) => x.path !== f.path);
             setFiles(rest);

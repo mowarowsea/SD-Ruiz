@@ -21,6 +21,7 @@ const gallery = new Gallery(cfg.forgeUrl, {
   imageFolders: cfg.imageFolders,
   iibDb: cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-webui-infinite-image-browsing/iib.db"),
   trashDir: cfg.trashDir,
+  savedDir: cfg.savedDir,
 });
 const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
 const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
@@ -125,25 +126,29 @@ server.get<{ Querystring: { kind: Kind; offset?: number; tag?: string; q?: strin
 
 server.get("/api/gallery/tags", async () => ({ tags: gallery.customTags() }));
 
-server.get<{ Querystring: { path: string; kind: Kind } }>("/api/gallery/info", async (req) => gallery.info(req.query.path, req.query.kind));
+server.get<{ Querystring: { path: string; kind: Kind } }>("/api/gallery/info", async (req) => gallery.info(req.query.path));
 
 const pathKindBody = { type: "object", required: ["path", "kind"], properties: { path: { type: "string" }, kind: kindSchema } };
 
 server.post<{ Body: { path: string; kind: Kind; tagId: number } }>(
   "/api/gallery/tag",
   { schema: { body: { ...pathKindBody, required: ["path", "kind", "tagId"], properties: { ...pathKindBody.properties, tagId: { type: "integer" } } } } },
-  async (req) => gallery.toggleTag(req.body.path, req.body.tagId, req.body.kind),
+  async (req) => gallery.toggleTag(req.body.path, req.body.tagId),
 );
 
-server.post<{ Body: { path: string; kind: Kind } }>("/api/gallery/delete", { schema: { body: pathKindBody } }, async (req) => gallery.remove(req.body.path, req.body.kind));
+server.post<{ Body: { path: string; kind: Kind } }>("/api/gallery/delete", { schema: { body: pathKindBody } }, async (req) => gallery.remove(req.body.path));
 
 // 整理: タグの付いていないものをゴミ箱フォルダへ
 const cleanupBody = { type: "object", required: ["keepSince"], properties: { keepSince: { type: "number" } } };
 
 server.post<{ Body: { keepSince: number } }>("/api/cleanup/preview", { schema: { body: cleanupBody } }, async (req) => {
   const t = await gallery.cleanupTargets(req.body.keepSince);
-  return { grids: t.grids.length, images: t.images.length, bytes: t.bytes, keptGrids: t.keptGrids, keptImages: t.keptImages };
+  const liked = await gallery.likedInOutput();
+  return { grids: t.grids.length, images: t.images.length, bytes: t.bytes, keptGrids: t.keptGrids, keptImages: t.keptImages, likedGrids: liked.grids.length, likedImages: liked.images.length };
 });
+
+// 出力フォルダに残っている Like 付き (IIB のタグで Like していた分) を保管庫へ
+server.post("/api/cleanup/migrate-liked", async () => gallery.migrateLiked());
 
 server.post<{ Body: { keepSince: number } }>("/api/cleanup/run", { schema: { body: cleanupBody } }, async (req) => gallery.cleanup(req.body.keepSince));
 
