@@ -12,8 +12,11 @@ export interface Config {
   tagFile: string;
   /** タグの和訳 CSV (`tag,訳` 形式、tags/ からの相対パス)。任意 */
   translationFile: string | null;
-  /** ギャラリーに出すフォルダ (IIB から見たパス)。未設定なら IIB の追加パスのうち grid 以外 */
-  galleryFolders: string[] | null;
+  /** ギャラリーの grid / 単体画像のフォルダ (IIB から見たパス)。未設定なら IIB の追加パスを grid とそれ以外に分けて使う */
+  gridFolders: string[] | null;
+  imageFolders: string[] | null;
+  /** 削除・整理で画像を移すフォルダ。未設定なら単体画像フォルダの実体の隣の SD-Ruiz-Trash */
+  trashDir: string | null;
 }
 
 const defaults: Config = {
@@ -23,7 +26,9 @@ const defaults: Config = {
   forgeDir: null,
   tagFile: "danbooru.csv",
   translationFile: null,
-  galleryFolders: null,
+  gridFolders: null,
+  imageFolders: null,
+  trashDir: null,
 };
 
 // config.json (git 管理外) があれば defaults を上書きする

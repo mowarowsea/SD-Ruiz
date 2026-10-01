@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { TagDictionary, listWildcards } from "./dictionary.js";
 import { ForgeClient, ForgeError } from "./forge.js";
-import { Gallery } from "./gallery.js";
+import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
 import { SidecarCache, thumbnail } from "./library.js";
 import { PrefsStore } from "./prefs.js";
@@ -16,7 +16,12 @@ const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
 const prefs = new PrefsStore();
-const gallery = new Gallery(cfg.forgeUrl, cfg.galleryFolders);
+const gallery = new Gallery(cfg.forgeUrl, {
+  gridFolders: cfg.gridFolders,
+  imageFolders: cfg.imageFolders,
+  iibDb: cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-webui-infinite-image-browsing/iib.db"),
+  trashDir: cfg.trashDir,
+});
 const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
 const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
@@ -105,38 +110,51 @@ server.get<{ Params: { kind: string }; Querystring: { id: string } }>("/api/thum
   return reply.type("image/webp").header("cache-control", "private, max-age=604800").send(await thumbnail(preview));
 });
 
-// ---- ギャラリー (IIB の中継) ----
+// ---- ギャラリー ----
 
-server.get<{ Querystring: { cursor?: string; q?: string; tags?: string; refresh?: string } }>("/api/gallery", async (req) => {
-  // 先頭ページを開くときは、新しく保存された画像を索引に取り込ませてから引く
-  if (req.query.refresh === "1" && !req.query.cursor) await gallery.refreshIndex().catch((e) => server.log.warn(e));
-  const tagIds = (req.query.tags ?? "").split(",").filter(Boolean).map(Number);
-  return gallery.list({ cursor: req.query.cursor, query: req.query.q, tagIds });
+const kindSchema = { type: "string", enum: ["grid", "image"] };
+
+server.get<{ Querystring: { kind: Kind; offset?: number; tag?: string; q?: string } }>(
+  "/api/gallery",
+  { schema: { querystring: { type: "object", required: ["kind"], properties: { kind: kindSchema, offset: { type: "integer", minimum: 0 }, tag: { type: "string" }, q: { type: "string" } } } } },
+  async (req) => {
+    const { kind, offset = 0, tag, q } = req.query;
+    return gallery.list({ kind, offset, limit: 90, tag: tag === "none" ? "none" : tag ? Number(tag) : undefined, q: q?.trim() || undefined });
+  },
+);
+
+server.get("/api/gallery/tags", async () => ({ tags: gallery.customTags() }));
+
+server.get<{ Querystring: { path: string; kind: Kind } }>("/api/gallery/info", async (req) => gallery.info(req.query.path, req.query.kind));
+
+const pathKindBody = { type: "object", required: ["path", "kind"], properties: { path: { type: "string" }, kind: kindSchema } };
+
+server.post<{ Body: { path: string; kind: Kind; tagId: number } }>(
+  "/api/gallery/tag",
+  { schema: { body: { ...pathKindBody, required: ["path", "kind", "tagId"], properties: { ...pathKindBody.properties, tagId: { type: "integer" } } } } },
+  async (req) => gallery.toggleTag(req.body.path, req.body.tagId, req.body.kind),
+);
+
+server.post<{ Body: { path: string; kind: Kind } }>("/api/gallery/delete", { schema: { body: pathKindBody } }, async (req) => gallery.remove(req.body.path, req.body.kind));
+
+// 整理: タグの付いていないものをゴミ箱フォルダへ
+const cleanupBody = { type: "object", required: ["keepSince"], properties: { keepSince: { type: "number" } } };
+
+server.post<{ Body: { keepSince: number } }>("/api/cleanup/preview", { schema: { body: cleanupBody } }, async (req) => {
+  const t = await gallery.cleanupTargets(req.body.keepSince);
+  return { grids: t.grids.length, images: t.images.length, bytes: t.bytes, keptGrids: t.keptGrids, keptImages: t.keptImages };
 });
 
-server.get("/api/gallery/tags", async () => ({ tags: await gallery.tags() }));
+server.post<{ Body: { keepSince: number } }>("/api/cleanup/run", { schema: { body: cleanupBody } }, async (req) => gallery.cleanup(req.body.keepSince));
 
-server.get<{ Querystring: { path: string } }>("/api/gallery/info", async (req) => gallery.info(req.query.path));
+server.get("/api/trash", async () => gallery.trashInfo());
 
-server.post<{ Body: { path: string; tagId: number } }>(
-  "/api/gallery/tag",
-  { schema: { body: { type: "object", required: ["path", "tagId"], properties: { path: { type: "string" }, tagId: { type: "integer" } } } } },
-  async (req) => {
-    const r = await gallery.toggleTag(req.body.path, req.body.tagId);
-    return { on: !r.is_remove };
-  },
-);
+server.post("/api/trash/empty", async () => {
+  await gallery.emptyTrash();
+  return { ok: true };
+});
 
-server.post<{ Body: { path: string } }>(
-  "/api/gallery/delete",
-  { schema: { body: { type: "object", required: ["path"], properties: { path: { type: "string" } } } } },
-  async (req) => {
-    await gallery.remove(req.body.path);
-    return { ok: true };
-  },
-);
-
-server.get<{ Params: { kind: string }; Querystring: { path: string; t: string } }>("/api/gallery/:kind", async (req, reply) => {
+server.get<{ Params: { kind: string }; Querystring: { path: string; t: string } }>("/api/gallery/image/:kind", async (req, reply) => {
   if (req.params.kind !== "thumb" && req.params.kind !== "file") return reply.code(404).send({ error: "not found" });
   const res = await gallery.fetchImage(req.query.path, req.query.t ?? "", req.params.kind === "thumb");
   if (!res.ok) return reply.code(res.status).send({ error: `IIB が ${res.status} を返しました` });

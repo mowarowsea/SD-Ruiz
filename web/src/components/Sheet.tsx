@@ -23,7 +23,7 @@ export function Sheet({ open, onClose, title, aside, children }: { open: boolean
           <h2 className="font-serif text-xl">{title}</h2>
           {aside && <span className="text-xs text-muted">{aside}</span>}
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
+        <div className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto pb-[max(1rem,env(safe-area-inset-bottom))]">{children}</div>
       </div>
     </div>
   );

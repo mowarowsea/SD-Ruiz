@@ -1,68 +1,72 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type GalleryFile, type GalleryTag, type GenerateParams, type Meta } from "../api";
+import { api, type GalleryFile, type GalleryInfo, type GalleryKind, type GalleryTag, type GenerateParams, type Meta } from "../api";
 import { infotextToParams, parseInfotext } from "../infotext";
 import { ImageViewer } from "./ImageViewer";
 import { PromptEditor } from "./PromptEditor";
 
-interface Info {
-  geninfo: string;
-  tags: GalleryTag[];
-}
-
-/** ギャラリーの画像詳細。ビューアの操作 (左右で送る・真ん中で閉じる) に、下部の操作バーを重ねる */
+/**
+ * ギャラリーの画像詳細。ビューアの操作 (左右で送る・真ん中で閉じる) に、下部の操作バーを重ねる。
+ * grid のタグは元画像にも同じように付け外しされ、削除も元画像ごとゴミ箱フォルダへ移る
+ */
 export function GalleryViewer({
+  kind,
   files,
   index,
   onIndex,
   onClose,
   onNearEnd,
+  onTagsChanged,
   onDeleted,
   customTags,
   meta,
   onUseSettings,
 }: {
+  kind: GalleryKind;
   files: GalleryFile[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
   onNearEnd: () => void;
+  onTagsChanged: (path: string, tags: GalleryTag[]) => void;
   onDeleted: (f: GalleryFile) => void;
   customTags: GalleryTag[];
   meta: Meta | null;
   onUseSettings: (p: Partial<GenerateParams>) => void;
 }) {
   const file = files[index];
-  const [infos, setInfos] = useState<Record<string, Info>>({});
+  const [infos, setInfos] = useState<Record<string, GalleryInfo>>({});
   const [panel, setPanel] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const info = file && infos[file.path];
+  const tags = info?.tags ?? file?.tags ?? [];
   const like = customTags.find((t) => t.name === "like");
   // ビューアを閉じ終わってから (履歴を戻してから) 実行したい処理
   const afterClose = useRef<(() => void) | null>(null);
 
   useEffect(() => {
+    setMessage(null);
     if (!file || infos[file.path]) return;
-    api.galleryInfo(file.path).then(
+    api.galleryInfo(file.path, kind).then(
       (i) => setInfos((m) => ({ ...m, [file.path]: i })),
-      (e) => setError((e as Error).message),
+      (e) => setMessage({ text: (e as Error).message, error: true }),
     );
     if (index >= files.length - 4) onNearEnd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file?.path]);
 
   if (!file) return null;
-  const has = (t: GalleryTag) => !!info?.tags.some((x) => x.id === t.id);
+  const has = (t: GalleryTag) => tags.some((x) => x.id === t.id);
 
   const toggleTag = async (t: GalleryTag) => {
-    setError(null);
     try {
-      const { on } = await api.toggleGalleryTag(file.path, t.id);
-      setInfos((m) => {
-        const cur = m[file.path] ?? { geninfo: "", tags: [] };
-        return { ...m, [file.path]: { ...cur, tags: on ? [...cur.tags, t] : cur.tags.filter((x) => x.id !== t.id) } };
-      });
+      const r = await api.toggleGalleryTag(file.path, kind, t.id);
+      const next = r.on ? [...tags.filter((x) => x.id !== t.id), t] : tags.filter((x) => x.id !== t.id);
+      setInfos((m) => (m[file.path] ? { ...m, [file.path]: { ...m[file.path], tags: next } } : m));
+      onTagsChanged(file.path, next);
+      const extra = r.count > 1 ? ` (元画像 ${r.count - 1} 枚にも)` : "";
+      setMessage({ text: `${t.name} を${r.on ? "付けました" : "外しました"}${extra}` });
     } catch (e) {
-      setError((e as Error).message);
+      setMessage({ text: (e as Error).message, error: true });
     }
   };
 
@@ -92,27 +96,26 @@ export function GalleryViewer({
   };
 
   const remove = async () => {
-    if (!confirm(`${file.name} を削除しますか？\n(ごみ箱には入らず、元に戻せません)`)) return;
-    setError(null);
+    const extra = kind === "grid" && info?.sources.length ? ` と元画像 ${info.sources.length} 枚` : "";
+    if (!confirm(`${file.name}${extra} をゴミ箱フォルダへ移しますか？\n(メニューの「整理」から空にするまでは元に戻せます)`)) return;
     try {
-      await api.deleteGalleryFile(file.path);
+      await api.deleteGalleryFile(file.path, kind);
       onDeleted(file);
     } catch (e) {
-      setError((e as Error).message);
+      setMessage({ text: (e as Error).message, error: true });
     }
   };
 
   const parsed = info ? parseInfotext(info.geninfo) : null;
+  const prompt = parsed && (parsed.params["Template"] ?? parsed.prompt);
+  const negative = parsed && (parsed.params["Negative Template"] ?? parsed.negative);
 
   return (
     <ImageViewer
       images={files.map((f) => api.galleryImageUrl(f, false))}
       placeholders={files.map((f) => api.galleryImageUrl(f, true))}
       index={index}
-      onIndex={(i) => {
-        setError(null);
-        onIndex(i);
-      }}
+      onIndex={onIndex}
       onClose={() => {
         onClose();
         afterClose.current?.();
@@ -121,30 +124,37 @@ export function GalleryViewer({
       loop={false}
       overlay={
         <>
-          <div className="pointer-events-none absolute inset-x-0 top-[max(2rem,calc(env(safe-area-inset-top)+1.25rem))] text-center font-mono text-[10px] text-white/45">{file.date}</div>
+          <div className="pointer-events-none absolute inset-x-0 top-[max(2rem,calc(env(safe-area-inset-top)+1.25rem))] text-center font-mono text-[10px] text-white/45">
+            {new Date(file.mtime).toLocaleString("sv-SE")} · {file.name}
+          </div>
 
-          {panel && parsed && (
+          {panel && (
             <div className="absolute inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] mx-auto max-h-[62%] max-w-xl overflow-y-auto rounded-t-2xl border-t border-line bg-bg/95 p-4 backdrop-blur">
-              <Section title="Prompt">
-                <PromptEditor key={`${file.path}-p`} value={parsed.params["Template"] ?? parsed.prompt} readOnly />
-              </Section>
-              {(parsed.params["Negative Template"] ?? parsed.negative) && (
-                <Section title="Negative">
-                  <PromptEditor key={`${file.path}-n`} value={parsed.params["Negative Template"] ?? parsed.negative} readOnly />
-                </Section>
+              {!parsed && <p className="text-sm text-muted">読み込み中…</p>}
+              {parsed && (
+                <>
+                  <Section title="Prompt">
+                    <PromptEditor key={`${file.path}-p`} value={prompt ?? ""} readOnly />
+                  </Section>
+                  {negative && (
+                    <Section title="Negative">
+                      <PromptEditor key={`${file.path}-n`} value={negative} readOnly />
+                    </Section>
+                  )}
+                  <Section title="Params">
+                    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[11px]">
+                      {Object.entries(parsed.params)
+                        .filter(([k]) => !/Template|hashes|Version|Source Identifier/i.test(k))
+                        .map(([k, v]) => (
+                          <div key={k} className="contents">
+                            <dt className="text-muted">{k}</dt>
+                            <dd className="break-all">{v}</dd>
+                          </div>
+                        ))}
+                    </dl>
+                  </Section>
+                </>
               )}
-              <Section title="Params">
-                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-[11px]">
-                  {Object.entries(parsed.params)
-                    .filter(([k]) => !/Template|hashes|Version|Source Identifier/i.test(k))
-                    .map(([k, v]) => (
-                      <div key={k} className="contents">
-                        <dt className="text-muted">{k}</dt>
-                        <dd className="break-all">{v}</dd>
-                      </div>
-                    ))}
-                </dl>
-              </Section>
               {customTags.length > 0 && (
                 <Section title="Tags">
                   <div className="flex flex-wrap gap-1.5">
@@ -160,11 +170,21 @@ export function GalleryViewer({
                   </div>
                 </Section>
               )}
+              {kind === "grid" && info && (
+                <Section title={`元画像 ${info.sources.length} 枚`}>
+                  <div className="flex gap-1.5 overflow-x-auto">
+                    {info.sources.map((s) => (
+                      <img key={s.path} src={api.galleryImageUrl(s, true)} alt={s.name} title={s.name} className="h-24 flex-none rounded-md" />
+                    ))}
+                    {info.sources.length === 0 && <p className="text-[11px] text-muted">見つかりませんでした</p>}
+                  </div>
+                </Section>
+              )}
             </div>
           )}
 
           <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent pt-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-            {error && <p className="mx-auto mb-1 max-w-xl px-4 text-xs break-words text-danger">{error}</p>}
+            {message && <p className={`mx-auto mb-1 max-w-xl px-4 text-center text-xs break-words ${message.error ? "text-danger" : "text-white/70"}`}>{message.text}</p>}
             <div className="mx-auto flex max-w-xl justify-around text-white/85">
               {like && <BarButton icon={has(like) ? "♥" : "♡"} label="Like" active={has(like)} onClick={() => toggleTag(like)} />}
               <BarButton icon="ⓘ" label="情報" active={panel} onClick={() => setPanel((v) => !v)} />

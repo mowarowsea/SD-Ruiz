@@ -99,7 +99,7 @@ export function GeneratePage({
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} />
       </div>
 
-      <ResultView job={job} last={last} progress={progress} onUseSeed={(seed) => patch({ seed })} />
+      <ResultView job={job} last={last} progress={progress} />
 
       {/* 生成ボタン (下部ナビの上に固定) */}
       <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 bg-gradient-to-t from-bg from-60% to-transparent px-4 pt-6 pb-3">

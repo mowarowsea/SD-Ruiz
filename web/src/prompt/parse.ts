@@ -3,7 +3,7 @@
 // 対応する構文
 // - 強調: (tag) (tag:1.2) [tag]   ※ \( \) はエスケープされた文字
 // - Extra networks: <lora:name:0.8>
-// - Dynamic Prompts: {a|b|c} {2$$a|b} __wildcard__
+// - Dynamic Prompts: {a|b|c} {2$$a|b} __wildcard__ ${var} ${var=...} ${var=!...}
 // - BREAK / AND
 // - コメント (Forge の "Remove Comments from Prompts"): # ... / // ... / /* ... */
 
@@ -17,6 +17,7 @@ export type SpanKind =
   | "separator" // {a|b} の |
   | "variant" // {2$$a|b} の 2$$
   | "wildcard"
+  | "variable" // ${var=...} の "${var="
   | "network" // <lora:...> 全体
   | "network-name"
   | "network-weight"
@@ -121,6 +122,17 @@ export function parsePrompt(text: string): ParseResult {
       const m = at(keywordRe, i);
       if (m && (i === 0 || !/\w/.test(text[i - 1]))) {
         spans.push({ from: i, to: i + m[0].length, kind: "keyword" });
+        i += m[0].length;
+        continue;
+      }
+    }
+
+    // Dynamic Prompts の変数 ${name} / ${name=値} / ${name=!値}。閉じ括弧は通常の } として扱う
+    if (c === "$" && text[i + 1] === "{") {
+      const m = /^\$\{[\w-]+(=!?)?/.exec(text.slice(i, i + 80));
+      if (m) {
+        spans.push({ from: i, to: i + m[0].length, kind: "variable" });
+        stack.push({ char: "{", pos: i + 1, depth: stack.length });
         i += m[0].length;
         continue;
       }

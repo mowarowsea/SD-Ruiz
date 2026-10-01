@@ -6,7 +6,7 @@ import { ImageViewer } from "./ImageViewer";
  * 生成中はライブプレビュー、それ以外は最後に成功したジョブの画像を並べる。
  * 失敗・中断したときはその旨を出したうえで、最後に成功した画像を残しておく
  */
-export function ResultView({ job, last, progress, onUseSeed }: { job: JobView | null; last: JobView | null; progress: Progress | null; onUseSeed: (seed: number) => void }) {
+export function ResultView({ job, last, progress }: { job: JobView | null; last: JobView | null; progress: Progress | null }) {
   const [viewing, setViewing] = useState<number | null>(null);
 
   if (job?.status === "running") {
@@ -23,7 +23,6 @@ export function ResultView({ job, last, progress, onUseSeed }: { job: JobView | 
 
   const failed = job?.status === "error";
   const interruptedEmpty = job && job.id !== last?.id && job.interrupted;
-  const seconds = last?.finishedAt ? ((last.finishedAt - last.startedAt) / 1000).toFixed(1) : null;
 
   return (
     <div className="mt-4 space-y-3">
@@ -35,21 +34,11 @@ export function ResultView({ job, last, progress, onUseSeed }: { job: JobView | 
           {last.interrupted && last.id === job?.id && <p className="text-xs text-muted">中断しました (途中までの結果)</p>}
           <div className={last.imageCount > 1 ? "grid grid-cols-2 gap-2" : ""}>
             {Array.from({ length: last.imageCount }, (_, i) => {
-              const seed = last.seeds[i];
               return (
                 <figure key={`${last.id}-${i}`} className="relative overflow-hidden rounded-2xl border border-line bg-surface">
                   <button className="block w-full" onClick={() => setViewing(i)}>
                     <img src={api.imageUrl(last.id, i)} alt={`生成結果 ${i + 1}`} className="w-full" />
                   </button>
-                  {seed !== undefined && (
-                    <figcaption className="absolute bottom-2 left-2 flex items-center gap-2 rounded-md bg-black/60 px-2 py-1 font-mono text-[10px] text-white">
-                      {i === 0 && seconds && <span>{seconds}s ·</span>}
-                      <span>seed {seed}</span>
-                      <button className="text-accent" onClick={() => onUseSeed(seed)} aria-label="このシードを使う">
-                        ♻
-                      </button>
-                    </figcaption>
-                  )}
                 </figure>
               );
             })}

@@ -58,7 +58,7 @@ export function App() {
         </div>
         {(nav.tab === "gallery" || galleryOpened.current) && (
           <div hidden={nav.tab !== "gallery"}>
-            <GalleryPage meta={meta} onUseSettings={applySettings} />
+            <GalleryPage active={nav.tab === "gallery"} meta={meta} onUseSettings={applySettings} />
           </div>
         )}
         {nav.tab === "more" && <MorePage />}

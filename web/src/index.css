@@ -162,3 +162,7 @@ input[type="number"]::-webkit-outer-spin-button {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
+.pt-variable {
+  color: #c7a4e3;
+  font-weight: 600;
+}

@@ -1,48 +1,45 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, type GalleryFile, type GalleryTag, type GenerateParams, type Meta } from "../api";
+import { api, type GalleryFile, type GalleryKind, type GalleryTag, type GenerateParams, type Meta } from "../api";
 import { GalleryViewer } from "../components/GalleryViewer";
+import { usePersistentState } from "../hooks";
 
-interface Filter {
-  q: string;
-  /** 手で付けるタグ (like など) */
-  custom: number | null;
-  model: number | null;
-}
+type TagFilter = number | "none" | null;
 
-const today = () => new Date().toLocaleDateString("sv-SE");
+const dayKey = (ms: number) => new Date(ms).toLocaleDateString("sv-SE");
 
-/** 生成画像の一覧 (IIB の索引を使う)。日付ごとに新しい順で並べ、下までスクロールすると続きを読む */
-export function GalleryPage({ meta, onUseSettings }: { meta: Meta | null; onUseSettings: (p: Partial<GenerateParams>) => void }) {
+/**
+ * 生成画像の一覧。普段は grid (バッチ 1 回分) で見る。日付ごとに新しい順で並べ、下までスクロールすると続きを読む
+ */
+export function GalleryPage({ active, meta, onUseSettings }: { active: boolean; meta: Meta | null; onUseSettings: (p: Partial<GenerateParams>) => void }) {
+  const [view, setView] = usePersistentState<{ kind: GalleryKind }>("ruiz.gallery", { kind: "grid" });
+  const kind = view.kind;
   const [tags, setTags] = useState<GalleryTag[]>([]);
-  const [filter, setFilter] = useState<Filter>({ q: "", custom: null, model: null });
+  const [tag, setTag] = useState<TagFilter>(null);
+  const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [files, setFiles] = useState<GalleryFile[]>([]);
-  const [next, setNext] = useState<string | null>(null);
+  const [next, setNext] = useState<number | null>(null);
+  const [total, setTotal] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const loadingRef = useRef(false);
-  const firstLoad = useRef(true);
 
   useEffect(() => {
     api.galleryTags().then((r) => setTags(r.tags), () => {});
   }, []);
-  const customTags = tags.filter((t) => t.type === "custom");
-  const modelTags = useMemo(() => tags.filter((t) => t.type === "Model").sort((a, b) => b.count - a.count), [tags]);
 
   const load = useCallback(
-    async (cursor: string | null) => {
+    async (offset: number) => {
       if (loadingRef.current) return;
       loadingRef.current = true;
       setLoading(true);
       setError(null);
       try {
-        const tagIds = [filter.custom, filter.model].filter((x): x is number => x !== null);
-        // 初回だけ、新しく保存された画像を索引に取り込ませる
-        const r = await api.gallery({ cursor, q: filter.q, tags: tagIds, refresh: firstLoad.current });
-        firstLoad.current = false;
-        setFiles((prev) => (cursor ? [...prev, ...r.files] : r.files));
+        const r = await api.gallery({ kind, offset, q, tag });
+        setFiles((prev) => (offset ? [...prev, ...r.files] : r.files));
         setNext(r.next);
+        setTotal(r.total);
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -50,90 +47,122 @@ export function GalleryPage({ meta, onUseSettings }: { meta: Meta | null; onUseS
         setLoading(false);
       }
     },
-    [filter],
+    [kind, q, tag],
   );
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setFiles([]);
     setNext(null);
-    void load(null);
+    void load(0);
   }, [load]);
+  useEffect(reload, [reload]);
+
+  // タブに戻ってきたときは、新しく増えた分だけを先頭に足す (スクロール位置はそのまま)
+  const refreshTop = useCallback(async () => {
+    if (loadingRef.current) return;
+    try {
+      const r = await api.gallery({ kind, offset: 0, q, tag });
+      setFiles((prev) => {
+        const known = new Set(prev.map((f) => f.path));
+        const fresh = r.files.filter((f) => !known.has(f.path));
+        return fresh.length ? [...fresh, ...prev] : prev;
+      });
+      setTotal(r.total);
+    } catch {
+      /* 次の機会に */
+    }
+  }, [kind, q, tag]);
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) {
+      first.current = false;
+      return;
+    }
+    if (active) void refreshTop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  useEffect(() => {
+    // ビューアを開いている間は並びを変えない (表示中の番号がずれるため)
+    const onVisible = () => document.visibilityState === "visible" && active && viewing === null && refreshTop();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [active, refreshTop, viewing]);
 
   // 一番下の目印が見えたら続きを読む
   const sentinel = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = sentinel.current;
     if (!el) return;
-    const io = new IntersectionObserver((es) => es[0].isIntersecting && next && load(next), { rootMargin: "800px" });
+    const io = new IntersectionObserver((es) => es[0].isIntersecting && next !== null && load(next), { rootMargin: "800px" });
     io.observe(el);
     return () => io.disconnect();
   }, [next, load]);
 
-  // 日付ごとにまとめる
   const groups = useMemo(() => {
-    const out: { date: string; items: { file: GalleryFile; index: number }[] }[] = [];
+    const out: { day: string; items: { file: GalleryFile; index: number }[] }[] = [];
     files.forEach((file, index) => {
-      const date = file.date.slice(0, 10);
-      if (out[out.length - 1]?.date !== date) out.push({ date, items: [] });
+      const day = dayKey(file.mtime);
+      if (out[out.length - 1]?.day !== day) out.push({ day, items: [] });
       out[out.length - 1].items.push({ file, index });
     });
     return out;
   }, [files]);
 
-  // タグ絞り込みと文字検索は IIB の API が別なので、どちらか一方にする
-  const setTag = (p: Partial<Filter>) => {
-    setQuery("");
-    setFilter((f) => ({ ...f, q: "", ...p }));
-  };
+  const today = dayKey(Date.now());
+  const chips: { id: TagFilter; label: string }[] = [
+    { id: null, label: "すべて" },
+    ...tags.map((t) => ({ id: t.id, label: t.name === "like" ? "♥ Like" : t.name })),
+    { id: "none", label: "タグなし" },
+  ];
 
   return (
     <div className="pb-24">
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setFilter({ q: query.trim(), custom: null, model: null });
-        }}
-      >
-        <input className="field w-full text-sm" type="search" placeholder="🔍 プロンプトで検索" value={query} onChange={(e) => setQuery(e.target.value)} enterKeyHint="search" />
-      </form>
-
-      <div className="-mx-4 mt-3 mb-4 flex items-center gap-1.5 overflow-x-auto px-4 [scrollbar-width:none]">
-        <Chip on={filter.custom === null && filter.model === null && !filter.q} onClick={() => setTag({ custom: null, model: null })}>
-          すべて
-        </Chip>
-        {customTags.map((t) => (
-          <Chip key={t.id} on={filter.custom === t.id} onClick={() => setTag({ custom: filter.custom === t.id ? null : t.id })}>
-            {t.name === "like" ? "♥ Like" : t.name}
-          </Chip>
-        ))}
-        {modelTags.length > 0 && (
-          <select
-            className={`max-w-48 flex-none rounded-full border bg-transparent px-3 py-1 text-xs outline-none ${filter.model !== null ? "border-accent text-accent" : "border-line text-muted"}`}
-            value={filter.model ?? ""}
-            onChange={(e) => setTag({ model: e.target.value ? Number(e.target.value) : null })}
-          >
-            <option value="">モデル: すべて</option>
-            {modelTags.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name} ({t.count})
-              </option>
-            ))}
-          </select>
-        )}
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex flex-none rounded-full border border-line p-0.5 text-xs">
+          {(["grid", "image"] as const).map((k) => (
+            <button key={k} onClick={() => setView({ kind: k })} className={`rounded-full px-3 py-1 ${kind === k ? "bg-accent text-accent-ink" : "text-muted"}`}>
+              {k === "grid" ? "Grid" : "画像"}
+            </button>
+          ))}
+        </div>
+        <form
+          className="min-w-0 flex-1"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setQ(query.trim());
+          }}
+        >
+          <input className="field w-full py-1.5! text-sm" type="search" placeholder="🔍 プロンプトで検索" value={query} onChange={(e) => setQuery(e.target.value)} enterKeyHint="search" />
+        </form>
       </div>
 
+      <div className="-mx-4 mb-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none]">
+        {chips.map((c) => (
+          <button
+            key={String(c.id)}
+            onClick={() => setTag(c.id)}
+            className={`flex-none rounded-full border px-3 py-1 text-xs ${tag === c.id ? "border-accent bg-accent text-accent-ink" : "border-line text-muted"}`}
+          >
+            {c.label}
+          </button>
+        ))}
+      </div>
+
+      {total !== null && <p className="-mt-2 mb-3 text-[11px] text-muted">{total.toLocaleString()} 件</p>}
       {error && <p className="mb-3 rounded-xl border border-danger/40 bg-danger/10 px-3 py-2 text-xs break-words text-danger">{error}</p>}
 
       {groups.map((g) => (
-        <section key={g.date} className="mb-5">
-          <h2 className="mb-2 flex items-baseline gap-2 font-serif text-lg">
-            {g.date === today() ? "今日" : g.date}
-            <span className="font-sans text-[11px] text-muted">{g.items.length}{g === groups[groups.length - 1] && next ? "+" : ""} 枚</span>
-          </h2>
-          <div className="grid grid-cols-3 gap-1">
+        <section key={g.day} className="mb-5">
+          <h2 className="mb-2 font-serif text-lg">{g.day === today ? "今日" : g.day}</h2>
+          <div className={kind === "grid" ? "grid grid-cols-2 items-start gap-1.5" : "grid grid-cols-3 gap-1"}>
             {g.items.map(({ file, index }) => (
-              <button key={file.path} onClick={() => setViewing(index)} className="aspect-square overflow-hidden rounded-md bg-surface">
-                <img src={api.galleryImageUrl(file, true)} alt={file.name} loading="lazy" decoding="async" className="size-full object-cover" />
+              <button
+                key={file.path}
+                onClick={() => setViewing(index)}
+                className={`relative overflow-hidden rounded-md bg-surface ${kind === "grid" ? "min-h-20" : "aspect-square"}`}
+              >
+                <img src={api.galleryImageUrl(file, true)} alt={file.name} loading="lazy" decoding="async" className={kind === "grid" ? "block w-full" : "size-full object-cover"} />
+                <TagBadges tags={file.tags ?? []} />
               </button>
             ))}
           </div>
@@ -146,18 +175,21 @@ export function GalleryPage({ meta, onUseSettings }: { meta: Meta | null; onUseS
 
       {viewing !== null && files[viewing] && (
         <GalleryViewer
+          kind={kind}
           files={files}
           index={viewing}
           onIndex={setViewing}
           onClose={() => setViewing(null)}
-          onNearEnd={() => next && load(next)}
+          onNearEnd={() => next !== null && load(next)}
+          onTagsChanged={(path, t) => setFiles((fs) => fs.map((f) => (f.path === path ? { ...f, tags: t } : f)))}
           onDeleted={(f) => {
             const rest = files.filter((x) => x.path !== f.path);
             setFiles(rest);
+            setTotal((t) => (t === null ? t : t - 1));
             if (!rest.length) history.back();
             else setViewing((i) => Math.min(i ?? 0, rest.length - 1));
           }}
-          customTags={customTags}
+          customTags={tags}
           meta={meta}
           onUseSettings={onUseSettings}
         />
@@ -166,10 +198,16 @@ export function GalleryPage({ meta, onUseSettings }: { meta: Meta | null; onUseS
   );
 }
 
-function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
+/** 一覧のタイルに付けるタグの印 (Like は ♥、それ以外は名前) */
+function TagBadges({ tags }: { tags: GalleryTag[] }) {
+  if (!tags.length) return null;
   return (
-    <button onClick={onClick} className={`flex-none rounded-full border px-3 py-1 text-xs ${on ? "border-accent bg-accent text-accent-ink" : "border-line text-muted"}`}>
-      {children}
-    </button>
+    <div className="pointer-events-none absolute top-1 right-1 flex gap-1">
+      {tags.map((t) => (
+        <span key={t.id} className="rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] leading-none text-accent">
+          {t.name === "like" ? "♥" : t.name}
+        </span>
+      ))}
+    </div>
   );
 }

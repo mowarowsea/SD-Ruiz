@@ -92,18 +92,35 @@ export interface JobState {
   last: JobView | null;
 }
 
-export interface GalleryFile {
-  path: string;
-  name: string;
-  date: string;
-  bytes: number;
-}
+export type GalleryKind = "grid" | "image";
 
 export interface GalleryTag {
   id: number;
   name: string;
-  type: string;
-  count: number;
+}
+
+export interface GalleryFile {
+  path: string;
+  name: string;
+  /** 更新日時 (ms) */
+  mtime: number;
+  bytes: number;
+  tags?: GalleryTag[];
+}
+
+export interface GalleryInfo {
+  geninfo: string;
+  tags: GalleryTag[];
+  /** grid の元画像 */
+  sources: GalleryFile[];
+}
+
+export interface CleanupPreview {
+  grids: number;
+  images: number;
+  bytes: number;
+  keptGrids: number;
+  keptImages: number;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -129,19 +146,22 @@ export const api = {
   setFavorite: (kind: "checkpoint" | "lora", id: string, on: boolean) =>
     request<Prefs>("/api/prefs/favorite", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id, on }) }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
-  gallery: (opts: { cursor?: string | null; q?: string; tags?: number[]; refresh?: boolean }) => {
-    const p = new URLSearchParams();
-    if (opts.cursor) p.set("cursor", opts.cursor);
+  gallery: (opts: { kind: GalleryKind; offset?: number; q?: string; tag?: number | "none" | null }) => {
+    const p = new URLSearchParams({ kind: opts.kind });
+    if (opts.offset) p.set("offset", String(opts.offset));
     if (opts.q) p.set("q", opts.q);
-    if (opts.tags?.length) p.set("tags", opts.tags.join(","));
-    if (opts.refresh) p.set("refresh", "1");
-    return request<{ files: GalleryFile[]; next: string | null }>(`/api/gallery?${p}`);
+    if (opts.tag !== undefined && opts.tag !== null) p.set("tag", String(opts.tag));
+    return request<{ files: GalleryFile[]; next: number | null; total: number }>(`/api/gallery?${p}`);
   },
   galleryTags: () => request<{ tags: GalleryTag[] }>("/api/gallery/tags"),
-  galleryInfo: (path: string) => request<{ geninfo: string; tags: GalleryTag[] }>(`/api/gallery/info?path=${encodeURIComponent(path)}`),
-  toggleGalleryTag: (path: string, tagId: number) => post<{ on: boolean }>("/api/gallery/tag", { path, tagId }),
-  deleteGalleryFile: (path: string) => post<{ ok: boolean }>("/api/gallery/delete", { path }),
-  galleryImageUrl: (f: GalleryFile, thumb: boolean) => `/api/gallery/${thumb ? "thumb" : "file"}?path=${encodeURIComponent(f.path)}&t=${encodeURIComponent(f.date)}`,
+  galleryInfo: (path: string, kind: GalleryKind) => request<GalleryInfo>(`/api/gallery/info?kind=${kind}&path=${encodeURIComponent(path)}`),
+  toggleGalleryTag: (path: string, kind: GalleryKind, tagId: number) => post<{ on: boolean; count: number }>("/api/gallery/tag", { path, kind, tagId }),
+  deleteGalleryFile: (path: string, kind: GalleryKind) => post<{ moved: number; bytes: number }>("/api/gallery/delete", { path, kind }),
+  galleryImageUrl: (f: GalleryFile, thumb: boolean) => `/api/gallery/image/${thumb ? "thumb" : "file"}?path=${encodeURIComponent(f.path)}&t=${Math.round(f.mtime)}`,
+  cleanupPreview: (keepSince: number) => post<CleanupPreview>("/api/cleanup/preview", { keepSince }),
+  cleanupRun: (keepSince: number) => post<{ moved: number; bytes: number }>("/api/cleanup/run", { keepSince }),
+  trash: () => request<{ dir: string; files: number; bytes: number }>("/api/trash"),
+  emptyTrash: () => post<{ ok: boolean }>("/api/trash/empty", {}),
   imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,
 };
 
@@ -177,4 +197,10 @@ export function baseLabel(base: string | null) {
   if (/flux/i.test(base)) return "Flux";
   const m = /^SD ?(\d(?:\.\d)?)/i.exec(base);
   return m ? m[1] : base;
+}
+
+export function formatBytes(n: number) {
+  if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
+  if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
+  return `${Math.round(n / 1024)} KB`;
 }

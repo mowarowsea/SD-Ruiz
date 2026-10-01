@@ -35,7 +35,7 @@ export function Star({ on, onClick, className = "" }: { on: boolean; onClick: ()
 /** 横スクロールの絞り込みチップ */
 export function FilterChips<T extends string>({ items, value, onChange }: { items: { id: T; label: string }[]; value: T; onChange: (v: T) => void }) {
   return (
-    <div className="-mx-4 my-3 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none]">
+    <div className="my-3 flex gap-1.5 overflow-x-auto [scrollbar-width:none]">
       {items.map((it) => (
         <button
           key={it.id}
