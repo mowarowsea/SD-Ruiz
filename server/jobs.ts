@@ -2,6 +2,8 @@
 // スマホの画面を閉じても生成は BFF 側で走り続け、再度開いたときに結果を取りに来られる。
 
 import { randomUUID } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { ForgeClient, Txt2ImgRequest } from "./forge.js";
 
 export interface GenerateParams {
@@ -35,13 +37,47 @@ export interface Job {
 
 export class JobBusyError extends Error {}
 
+// 最後に成功したジョブは data/last/ に保存し、サーバーを再起動しても復元する
+const lastDir = fileURLToPath(new URL("../data/last", import.meta.url));
+
+function saveLast(job: Job) {
+  rmSync(lastDir, { recursive: true, force: true });
+  mkdirSync(lastDir, { recursive: true });
+  job.images.forEach((img, i) => writeFileSync(`${lastDir}/${i}.png`, img));
+  const { images: _images, ...meta } = job;
+  writeFileSync(`${lastDir}/job.json`, JSON.stringify(meta, null, 2));
+}
+
+function loadLast(): Job | null {
+  try {
+    if (!existsSync(`${lastDir}/job.json`)) return null;
+    const meta = JSON.parse(readFileSync(`${lastDir}/job.json`, "utf8")) as Omit<Job, "images">;
+    const count = readdirSync(lastDir).filter((f) => /^\d+\.png$/.test(f)).length;
+    const images = Array.from({ length: count }, (_, i) => readFileSync(`${lastDir}/${i}.png`));
+    return { ...meta, images };
+  } catch {
+    return null;
+  }
+}
+
 export class JobManager {
   private job: Job | null = null;
+  /** 最後に画像ができたジョブ (中断でも 1 枚以上できていれば成功扱い) */
+  private lastSuccess: Job | null = loadLast();
 
   constructor(private readonly forge: ForgeClient) {}
 
   get current() {
     return this.job;
+  }
+
+  get last() {
+    return this.lastSuccess;
+  }
+
+  /** 画像を引くときは実行中 / 直近のジョブと、最後に成功したジョブの両方から探す */
+  find(id: string) {
+    return [this.job, this.lastSuccess].find((j) => j?.id === id) ?? null;
   }
 
   start(params: GenerateParams): Job {
@@ -83,6 +119,11 @@ export class JobManager {
       job.seeds = info.all_seeds ?? [];
       job.prompts = info.all_prompts ?? [];
       job.status = "done";
+      if (job.images.length) {
+        job.finishedAt = Date.now();
+        this.lastSuccess = job;
+        saveLast(job);
+      }
     } catch (e) {
       job.status = "error";
       job.error = (e as Error).message;

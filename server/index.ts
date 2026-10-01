@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { TagDictionary, listWildcards } from "./dictionary.js";
 import { ForgeClient, ForgeError } from "./forge.js";
+import { Gallery } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
 import { SidecarCache, thumbnail } from "./library.js";
 import { PrefsStore } from "./prefs.js";
@@ -15,6 +16,7 @@ const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
 const prefs = new PrefsStore();
+const gallery = new Gallery(cfg.forgeUrl, cfg.galleryFolders);
 const tags = new TagDictionary(cfg.forgeDir && join(cfg.forgeDir, "extensions/a1111-sd-webui-tagcomplete/tags"), cfg.tagFile, cfg.translationFile);
 const wildcardsDir = cfg.forgeDir && join(cfg.forgeDir, "extensions/sd-dynamic-prompts/wildcards");
 const server = Fastify({ logger: { level: "info" }, bodyLimit: 1024 * 1024 });
@@ -103,6 +105,47 @@ server.get<{ Params: { kind: string }; Querystring: { id: string } }>("/api/thum
   return reply.type("image/webp").header("cache-control", "private, max-age=604800").send(await thumbnail(preview));
 });
 
+// ---- ギャラリー (IIB の中継) ----
+
+server.get<{ Querystring: { cursor?: string; q?: string; tags?: string; refresh?: string } }>("/api/gallery", async (req) => {
+  // 先頭ページを開くときは、新しく保存された画像を索引に取り込ませてから引く
+  if (req.query.refresh === "1" && !req.query.cursor) await gallery.refreshIndex().catch((e) => server.log.warn(e));
+  const tagIds = (req.query.tags ?? "").split(",").filter(Boolean).map(Number);
+  return gallery.list({ cursor: req.query.cursor, query: req.query.q, tagIds });
+});
+
+server.get("/api/gallery/tags", async () => ({ tags: await gallery.tags() }));
+
+server.get<{ Querystring: { path: string } }>("/api/gallery/info", async (req) => gallery.info(req.query.path));
+
+server.post<{ Body: { path: string; tagId: number } }>(
+  "/api/gallery/tag",
+  { schema: { body: { type: "object", required: ["path", "tagId"], properties: { path: { type: "string" }, tagId: { type: "integer" } } } } },
+  async (req) => {
+    const r = await gallery.toggleTag(req.body.path, req.body.tagId);
+    return { on: !r.is_remove };
+  },
+);
+
+server.post<{ Body: { path: string } }>(
+  "/api/gallery/delete",
+  { schema: { body: { type: "object", required: ["path"], properties: { path: { type: "string" } } } } },
+  async (req) => {
+    await gallery.remove(req.body.path);
+    return { ok: true };
+  },
+);
+
+server.get<{ Params: { kind: string }; Querystring: { path: string; t: string } }>("/api/gallery/:kind", async (req, reply) => {
+  if (req.params.kind !== "thumb" && req.params.kind !== "file") return reply.code(404).send({ error: "not found" });
+  const res = await gallery.fetchImage(req.query.path, req.query.t ?? "", req.params.kind === "thumb");
+  if (!res.ok) return reply.code(res.status).send({ error: `IIB が ${res.status} を返しました` });
+  return reply
+    .type(res.headers.get("content-type") ?? "application/octet-stream")
+    .header("cache-control", "private, max-age=31536000, immutable")
+    .send(Buffer.from(await res.arrayBuffer()));
+});
+
 // 端末をまたいで共有する設定
 server.get("/api/prefs", async () => prefs.value);
 
@@ -171,14 +214,16 @@ function jobView(job: Job) {
   };
 }
 
-// 直近のジョブの状態。生成中なら Forge の進捗とライブプレビューも付ける
+// 直近のジョブの状態と、最後に成功したジョブ。生成中なら Forge の進捗とライブプレビューも付ける
 server.get("/api/job", async () => {
   const job = jobs.current;
-  if (!job) return { job: null, progress: null };
-  if (job.status !== "running") return { job: jobView(job), progress: null };
+  const last = jobs.last && jobView(jobs.last);
+  if (!job) return { job: null, progress: null, last };
+  if (job.status !== "running") return { job: jobView(job), progress: null, last };
   const p = await forge.progress(true).catch(() => null);
   return {
     job: jobView(job),
+    last,
     progress: p && {
       ratio: p.progress,
       eta: p.eta_relative,
@@ -190,8 +235,7 @@ server.get("/api/job", async () => {
 });
 
 server.get<{ Params: { id: string; index: string } }>("/api/job/:id/image/:index", async (req, reply) => {
-  const job = jobs.current;
-  const image = job?.id === req.params.id ? job.images[Number(req.params.index)] : undefined;
+  const image = jobs.find(req.params.id)?.images[Number(req.params.index)];
   if (!image) return reply.code(404).send({ error: "画像がありません" });
   return reply.type("image/png").header("cache-control", "private, max-age=86400").send(image);
 });

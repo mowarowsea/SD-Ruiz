@@ -21,7 +21,20 @@ const theme = EditorView.theme(
 );
 
 /** シンタックスハイライトと補完つきのプロンプト入力欄 */
-export function PromptEditor({ value, onChange, placeholder, minHeight }: { value: string; onChange: (v: string) => void; placeholder?: string; minHeight: string }) {
+export function PromptEditor({
+  value,
+  onChange,
+  placeholder,
+  minHeight,
+  readOnly = false,
+}: {
+  value: string;
+  onChange?: (v: string) => void;
+  placeholder?: string;
+  minHeight?: string;
+  /** 表示専用 (ギャラリーの生成情報など)。ハイライトだけ効かせる */
+  readOnly?: boolean;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const changeRef = useRef(onChange);
@@ -33,6 +46,7 @@ export function PromptEditor({ value, onChange, placeholder, minHeight }: { valu
       state: EditorState.create({
         doc: value,
         extensions: [
+          ...(readOnly ? [EditorState.readOnly.of(true), EditorView.editable.of(false)] : []),
           history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
           EditorView.lineWrapping,
@@ -44,7 +58,7 @@ export function PromptEditor({ value, onChange, placeholder, minHeight }: { valu
           tooltips({ parent: document.body }),
           theme,
           EditorView.updateListener.of((u) => {
-            if (u.docChanged) changeRef.current(u.state.doc.toString());
+            if (u.docChanged) changeRef.current?.(u.state.doc.toString());
           }),
         ],
       }),

@@ -47,14 +47,14 @@ export function useForgeStatus(intervalMs = 10_000) {
  * 画面を開き直したときも BFF 側のジョブを拾うので、生成中にスマホを閉じても結果は失われない。
  */
 export function useJob() {
-  const [state, setState] = useState<JobState>({ job: null, progress: null });
+  const [state, setState] = useState<JobState & { loaded: boolean }>({ job: null, progress: null, last: null, loaded: false });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const poll = useCallback(async () => {
     if (timer.current) clearTimeout(timer.current);
     try {
       const s = await api.job();
-      setState(s);
+      setState({ ...s, loaded: true });
       if (s.job?.status === "running") timer.current = setTimeout(poll, 700);
     } catch {
       timer.current = setTimeout(poll, 3000);

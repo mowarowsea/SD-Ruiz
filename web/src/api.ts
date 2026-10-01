@@ -88,6 +88,22 @@ export interface Progress {
 export interface JobState {
   job: JobView | null;
   progress: Progress | null;
+  /** 最後に成功したジョブ (サーバー再起動後も残る) */
+  last: JobView | null;
+}
+
+export interface GalleryFile {
+  path: string;
+  name: string;
+  date: string;
+  bytes: number;
+}
+
+export interface GalleryTag {
+  id: number;
+  name: string;
+  type: string;
+  count: number;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -113,6 +129,19 @@ export const api = {
   setFavorite: (kind: "checkpoint" | "lora", id: string, on: boolean) =>
     request<Prefs>("/api/prefs/favorite", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id, on }) }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
+  gallery: (opts: { cursor?: string | null; q?: string; tags?: number[]; refresh?: boolean }) => {
+    const p = new URLSearchParams();
+    if (opts.cursor) p.set("cursor", opts.cursor);
+    if (opts.q) p.set("q", opts.q);
+    if (opts.tags?.length) p.set("tags", opts.tags.join(","));
+    if (opts.refresh) p.set("refresh", "1");
+    return request<{ files: GalleryFile[]; next: string | null }>(`/api/gallery?${p}`);
+  },
+  galleryTags: () => request<{ tags: GalleryTag[] }>("/api/gallery/tags"),
+  galleryInfo: (path: string) => request<{ geninfo: string; tags: GalleryTag[] }>(`/api/gallery/info?path=${encodeURIComponent(path)}`),
+  toggleGalleryTag: (path: string, tagId: number) => post<{ on: boolean }>("/api/gallery/tag", { path, tagId }),
+  deleteGalleryFile: (path: string) => post<{ ok: boolean }>("/api/gallery/delete", { path }),
+  galleryImageUrl: (f: GalleryFile, thumb: boolean) => `/api/gallery/${thumb ? "thumb" : "file"}?path=${encodeURIComponent(f.path)}&t=${encodeURIComponent(f.date)}`,
   imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,
 };
 

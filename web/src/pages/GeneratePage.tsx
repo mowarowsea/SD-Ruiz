@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
 import { api, baseLabel, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { LoraChips } from "../components/LoraChips";
@@ -8,27 +8,23 @@ import { addLora, findLoras, removeLora } from "../prompt/lora";
 import { PromptEditor } from "../components/PromptEditor";
 import { ParamsAccordion } from "../components/ParamsAccordion";
 import { ResultView } from "../components/ResultView";
-import { useJob, usePersistentState, usePrefs } from "../hooks";
+import { type useJob, usePrefs } from "../hooks";
 
-const defaults: GenerateParams = {
-  checkpoint: "",
-  prompt: "",
-  negative: "",
-  width: 832,
-  height: 1216,
-  steps: 28,
-  cfg: 5,
-  sampler: "Euler a",
-  scheduler: "automatic",
-  seed: -1,
-  batch: 1,
-};
-
-export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeStatus | null }) {
-  // 入力内容は端末に保存しておき、リロードやタブを閉じても残す
-  const [form, setForm] = usePersistentState("ruiz.generate", defaults);
+export function GeneratePage({
+  meta,
+  forge,
+  form,
+  setForm,
+  jobState,
+}: {
+  meta: Meta | null;
+  forge: ForgeStatus | null;
+  form: GenerateParams;
+  setForm: Dispatch<SetStateAction<GenerateParams>>;
+  jobState: ReturnType<typeof useJob>;
+}) {
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
-  const { job, progress, refresh } = useJob();
+  const { job, last, progress, refresh } = jobState;
   const { prefs, reload: reloadPrefs, setFavorite } = usePrefs();
   const [sheet, setSheet] = useState<"checkpoint" | "lora" | null>(null);
   const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
@@ -74,7 +70,7 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
     }
   };
 
-  const lastSeed = job?.status === "done" && job.seeds.length ? job.seeds[0] : null;
+  const lastSeed = last?.seeds.length ? last.seeds[0] : null;
 
   return (
     <div className="pb-44">
@@ -103,7 +99,7 @@ export function GeneratePage({ meta, forge }: { meta: Meta | null; forge: ForgeS
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} />
       </div>
 
-      <ResultView job={job} progress={progress} onUseSeed={(seed) => patch({ seed })} />
+      <ResultView job={job} last={last} progress={progress} onUseSeed={(seed) => patch({ seed })} />
 
       {/* 生成ボタン (下部ナビの上に固定) */}
       <div className="fixed inset-x-0 bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-20 bg-gradient-to-t from-bg from-60% to-transparent px-4 pt-6 pb-3">

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { api, type ForgeStatus, type Meta } from "./api";
+import { useEffect, useRef, useState } from "react";
+import { api, type ForgeStatus, type GenerateParams, type Meta } from "./api";
+import { defaultForm, toForm } from "./form";
 import { BottomNav, type Tab } from "./components/BottomNav";
-import { useForgeStatus, usePersistentState } from "./hooks";
+import { useForgeStatus, useJob, usePersistentState } from "./hooks";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
 import { MorePage } from "./pages/MorePage";
@@ -10,6 +11,26 @@ export function App() {
   const [nav, setNav] = usePersistentState<{ tab: Tab }>("ruiz.nav", { tab: "generate" });
   const { status, serverDown } = useForgeStatus();
   const [meta, setMeta] = useState<Meta | null>(null);
+  const jobState = useJob();
+  const galleryOpened = useRef(false);
+  if (nav.tab === "gallery") galleryOpened.current = true;
+  const [form, setForm] = useState<GenerateParams>(defaultForm);
+
+  // 開いたときは「最後に成功した生成」の設定に戻す (生成中ならその設定)。PC でもスマホでも同じ状態になる
+  const restored = useRef(false);
+  useEffect(() => {
+    if (!jobState.loaded || restored.current) return;
+    restored.current = true;
+    const src = jobState.job?.status === "running" ? jobState.job.params : jobState.last?.params;
+    if (src) setForm(toForm(src));
+  }, [jobState]);
+
+  // ギャラリーなどから設定を受け取って生成画面へ
+  const applySettings = (p: Partial<GenerateParams>) => {
+    setForm((f) => ({ ...f, ...p }));
+    setNav({ tab: "generate" });
+    scrollTo(0, 0);
+  };
 
   // Forge が使える状態になったらモデル一覧などを取りにいく
   useEffect(() => {
@@ -31,8 +52,15 @@ export function App() {
         ) : (
           status && !status.online && <Notice>{forgeMessage(status)}</Notice>
         )}
-        {nav.tab === "generate" && <GeneratePage meta={meta} forge={status} />}
-        {nav.tab === "gallery" && <GalleryPage />}
+        {/* 生成とギャラリーは一度開いたら保持しておく (入力中の内容やスクロール位置を失わない) */}
+        <div hidden={nav.tab !== "generate"}>
+          <GeneratePage meta={meta} forge={status} form={form} setForm={setForm} jobState={jobState} />
+        </div>
+        {(nav.tab === "gallery" || galleryOpened.current) && (
+          <div hidden={nav.tab !== "gallery"}>
+            <GalleryPage meta={meta} onUseSettings={applySettings} />
+          </div>
+        )}
         {nav.tab === "more" && <MorePage />}
       </main>
 

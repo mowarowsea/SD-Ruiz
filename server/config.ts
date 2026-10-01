@@ -12,6 +12,8 @@ export interface Config {
   tagFile: string;
   /** タグの和訳 CSV (`tag,訳` 形式、tags/ からの相対パス)。任意 */
   translationFile: string | null;
+  /** ギャラリーに出すフォルダ (IIB から見たパス)。未設定なら IIB の追加パスのうち grid 以外 */
+  galleryFolders: string[] | null;
 }
 
 const defaults: Config = {
@@ -21,6 +23,7 @@ const defaults: Config = {
   forgeDir: null,
   tagFile: "danbooru.csv",
   translationFile: null,
+  galleryFolders: null,
 };
 
 // config.json (git 管理外) があれば defaults を上書きする
