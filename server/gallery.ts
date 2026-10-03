@@ -8,7 +8,9 @@
 //   整理の対象にはならない。タグが全部外れたら出力フォルダへ戻す。保管庫のタグは保管庫の中の JSON に持つ (IIB では付けられないため)
 //   名前は Forge の Save に合わせ、grid は "2026-10-01_grid-0020.jpg"、元画像は "<grid の名前>_<元の名前>"
 //
-// grid の元画像は「1 つ前の grid から、この grid までの間に保存された単体画像」とみなす (Forge は単体画像を書いたあとに grid を書く)。
+// grid の元画像は、名前の末尾の生成 ID (job_timestamp) が同じ単体画像 ("grid-0020-<seed>-<ID>.jpg" と "00123-<seed>-<ID>.png")。
+// SD-Ruiz が生成のたびにこの名前の書式を Forge に送る (2026-10-04 から)。それより前の ID の無いものは、
+// 「1 つ前の grid から、この grid までの間に保存された単体画像」とみなす (Forge は単体画像を書いたあとに grid を書く)。
 // バッチ 1 の生成 (grid なし) を取り違えないよう、grid との時間差と Seed でも絞る。
 
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -51,8 +53,8 @@ const imageExt = /\.(png|jpe?g|webp|avif)$/i;
 const sourceWindowMs = 2 * 60 * 1000;
 const key = (p: string) => p.toLowerCase();
 const under = (p: string, root: string) => key(p).startsWith(key(root) + "\\") || key(p).startsWith(key(root) + "/");
-/** 保管庫の中で grid とみなす名前 ("grid-0205.png" "2026-04-02_grid-0079.png" など) */
-const isGridName = (name: string) => /(^|[_-])grid-\d+\.(png|jpe?g|webp|avif)$/i.test(name);
+/** 保管庫の中で grid とみなす名前 ("grid-0205.png" "2026-04-02_grid-0079.png" "grid-0020-<seed>-<生成 ID>.jpg" など) */
+const isGridName = (name: string) => /(^|[_-])grid-\d+(-\d+-\d{14})?\.(png|jpe?g|webp|avif)$/i.test(name);
 /** "2026-10-01_grid-0020.jpg" → 日付フォルダと残りの名前 */
 const splitDay = (name: string) => {
   const m = /^(\d{4}-\d{2}-\d{2})_(.+)$/.exec(name);
@@ -95,6 +97,15 @@ function pngParameters(path: string): string | null {
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * ファイル名の末尾の生成 ID ("00123-<seed>-20261004153012.png" / "grid-0020-<seed>-20261004153012.jpg")。
+ * 6 月以前の "00052-20260630093422.png" (Seed の代わりに日時) は数字が 1 組だけなので当てはまらない
+ */
+function fileJobId(name: string) {
+  const m = /^(?:grid-)?\d+-\d+-(\d{14})\.\w+$/i.exec(name);
+  return m ? m[1] : null;
 }
 
 /** ファイル名 "00025-2534786345.png" の Seed */
@@ -437,6 +448,7 @@ export class Gallery {
 
   /**
    * 出力フォルダの grid ごとの元画像と、grid の無い単体画像 (バッチ 1 の生成)。フォルダが変わったときだけ作り直す
+   * 生成 ID の付いた grid は同じ ID の画像 (strict と wide は同じ)。ID の無い古い grid は ID の無い画像の中から:
    * - wide: 「1 つ前の grid から、この grid までの間」かつ grid との時間差 2 分以内の画像 (整理で取りこぼさないよう広め)
    * - strict: wide のうち、最後の画像から Seed が 1 ずつ (または同じ値で) 続いている部分 (直前のバッチ 1 の画像を除く)
    */
@@ -445,12 +457,33 @@ export class Gallery {
     const images = await this.files("image");
     const sig = `${grids.length}:${grids[0]?.mtime}:${images.length}:${images[0]?.mtime}`;
     if (this.mapCache?.sig === sig) return this.mapCache;
-    const gridsAsc = [...grids].reverse();
-    const imagesAsc = [...images].reverse();
     const strict = new Map<string, GalleryFile[]>();
     const wide = new Map<string, GalleryFile[]>();
     const gridOfImage = new Map<string, GalleryFile>();
     const used = new Set<string>();
+    // 生成 ID の付いたものは ID で対応を取る (grid の無い ID の画像はバッチ 1 の生成)
+    const byJob = new Map<string, GalleryFile[]>();
+    for (const f of images) {
+      const id = fileJobId(f.name);
+      if (id) byJob.set(id, [...(byJob.get(id) ?? []), f]);
+    }
+    const legacyGrids: GalleryFile[] = [];
+    for (const g of grids) {
+      const id = fileJobId(g.name);
+      if (!id) {
+        legacyGrids.push(g);
+        continue;
+      }
+      const run = byJob.get(id) ?? [];
+      strict.set(key(g.path), run);
+      wide.set(key(g.path), run);
+      for (const f of run) {
+        gridOfImage.set(key(f.path), g);
+        used.add(key(f.path));
+      }
+    }
+    const gridsAsc = [...legacyGrids].reverse();
+    const imagesAsc = images.filter((f) => !fileJobId(f.name)).reverse();
     let j = 0;
     let prev = 0;
     for (const g of gridsAsc) {

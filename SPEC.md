@@ -154,7 +154,8 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - 昔の Save の grid には Dynamic Prompts の展開前の構文 (Template) が残っていない
 - タグの種類 (Like / useful / temp など) は IIB のカスタムタグ。出力フォルダのタグは IIB の DB (`iib.db`) を読み取り専用で参照する (保管庫を使う前に IIB で付けた分)
 - サムネイル・元画像・生成情報・プロンプト検索は IIB の API を BFF が中継する
-- grid と元画像の対応: 「1 つ前の grid から、この grid までの間に保存された単体画像」(IIB Manager と同じ考え方) のうち、grid との時間差が 2 分以内のもの。
+- grid と元画像の名前: 生成のたびに `override_settings` で `samples_filename_pattern: "[seed]-[job_timestamp]"` と `grid_extended_filename: true` を送り、grid と元画像の名前の末尾に同じ生成 ID (job_timestamp。1 回の生成の間は同じ値) を付ける (`00123-<seed>-20261004153012.png` / `grid-0020-<seed>-20261004153012.jpg`)。Forge 側にも設定として残るので、Forge の画面から生成した分も同じ名前になる
+- grid と元画像の対応: 生成 ID の付いた grid は、同じ生成 ID の単体画像。生成 ID の無い古いもの (2026-10-04 より前) は、ID の無い単体画像の中から「1 つ前の grid から、この grid までの間に保存された単体画像」(IIB Manager と同じ考え方) のうち、grid との時間差が 2 分以内のもの。
   さらに、最後の画像からファイル名の Seed が 1 ずつ (2026 年 6 月以前は Seed の代わりに日時が入っていて同じ値で) 続いている部分だけを元画像とし、直前のバッチ 1 の画像を除く。
   どの grid の元画像にもならない単体画像 (バッチ 1 の生成) は grid の無い画像として Grid 表示にも出す。整理で残すものを決めるときは除く前の広い方を使う
 - 一覧: Grid / 画像 の切り替え (既定は Grid)。Grid 表示の一覧は grid と、grid の無い画像。新しい順、日付ごとの見出しつき。下までスクロールすると続きを読む。タブに戻ったときは新しく増えた分だけ先頭に足す

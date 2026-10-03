@@ -115,7 +115,15 @@ export class JobManager {
       // Checkpoint と TE / VAE は生成時に切り替え、そのまま Forge 側の選択として残す。
       // TE / VAE は要らないモデルでも [] を毎回送る (送らないと前に使った Anima の TE / VAE が残る)。
       // dp_write_raw_template: 書いたままのプロンプトを PNG に Template として残す (# のコメントは Dynamic Prompts が消すため、これが無いと to t2i で戻せない)
-      override_settings: { sd_model_checkpoint: p.checkpoint, forge_additional_modules: job.modules, dp_write_raw_template: true },
+      // samples_filename_pattern / grid_extended_filename: grid と元画像の名前の末尾に同じ生成 ID (job_timestamp) を付け、ギャラリーで紐付ける
+      //   ("00123-<seed>-20261004153012.png" と "grid-0020-<seed>-20261004153012.jpg")
+      override_settings: {
+        sd_model_checkpoint: p.checkpoint,
+        forge_additional_modules: job.modules,
+        dp_write_raw_template: true,
+        samples_filename_pattern: "[seed]-[job_timestamp]",
+        grid_extended_filename: true,
+      },
       override_settings_restore_afterwards: false,
     };
     try {
