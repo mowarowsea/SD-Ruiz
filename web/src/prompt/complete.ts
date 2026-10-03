@@ -85,10 +85,30 @@ export const translationColumn = {
 
 const hasJapanese = (s: string) => /[^\x00-\x7f]/.test(s);
 
-/** 補完の後ろに区切りの ", " を付ける (すでに続いていれば付けない) */
-function withComma(view: { state: { doc: { sliceString(a: number, b: number): string } } }, to: number) {
-  const next = view.state.doc.sliceString(to, to + 1);
-  return next === "," ? "" : ", ";
+/**
+ * 補完の後ろに付ける区切り。後ろを見て決める。
+ * 行末なら ", "、区切りや閉じ括弧・重みの : が続くなら何も付けない、空白のあとにタグが続くなら "," だけ
+ */
+function separatorAfter(view: EditorView, to: number) {
+  const line = view.state.doc.lineAt(to);
+  const [, space, next] = /^([ \t]*)(.?)/.exec(line.text.slice(to - line.from))!;
+  if (!next) return ", ";
+  if (/[,)\]}:>|]/.test(next)) return "";
+  return space ? "," : ", ";
+}
+
+const android = typeof navigator === "object" && /Android/.test(navigator.userAgent);
+
+/**
+ * 補完を入れる。スマホのキーボードが入力中 (下線つき) のままだと、置き換えたあとで入力中の文字に上書きし直されるので、
+ * いったんフォーカスを外して確定させてから入れる
+ */
+function insertCompletion(view: EditorView, from: number, to: number, insert: string) {
+  if (view.compositionStarted || android) {
+    view.contentDOM.blur();
+    view.focus();
+  }
+  view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length }, userEvent: "input.complete" });
 }
 
 async function wildcardSource(ctx: CompletionContext): Promise<CompletionResult | null> {
@@ -103,7 +123,12 @@ async function wildcardSource(ctx: CompletionContext): Promise<CompletionResult 
     options: list
       .filter((w) => w.toLowerCase().includes(q))
       .slice(0, 50)
-      .map((w) => ({ label: `__${w}__`, type: "wildcard", apply: `__${w}__`, used: used.wildcard(w) })),
+      .map((w) => ({
+        label: `__${w}__`,
+        type: "wildcard",
+        apply: (view, _c, from, to) => insertCompletion(view, from, to, `__${w}__`),
+        used: used.wildcard(w),
+      })),
   };
 }
 
@@ -119,7 +144,13 @@ async function loraSource(ctx: CompletionContext): Promise<CompletionResult | nu
     options: list
       .filter((l) => l.name.toLowerCase().includes(q) || l.folder.toLowerCase().includes(q))
       .slice(0, 50)
-      .map((l) => ({ label: l.name, detail: l.folder, type: "lora", apply: `<lora:${l.name}:1>`, used: used.lora(l.name) })),
+      .map((l) => ({
+        label: l.name,
+        detail: l.folder,
+        type: "lora",
+        apply: (view, _c, from, to) => insertCompletion(view, from, to, `<lora:${l.name}:1>`),
+        used: used.lora(l.name),
+      })),
   };
 }
 
@@ -149,10 +180,7 @@ async function tagSource(ctx: CompletionContext): Promise<CompletionResult | nul
         translation: t.translation ?? "",
         type: `tag-${t.category}`,
         used: used.tag(t.name),
-        apply: (view, _c, from, to) => {
-          const insert = tagToPrompt(t.name) + withComma(view, to);
-          view.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
-        },
+        apply: (view, _c, from, to) => insertCompletion(view, from, to, tagToPrompt(t.name) + separatorAfter(view, to)),
       }),
     ),
   };
