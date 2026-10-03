@@ -72,6 +72,16 @@ export const knowledge: Knowledge[] = [
     seen: [],
   },
   {
+    id: "llm-te-batch-stack",
+    title: "バッチ内でプロンプトの長さが違って生成に失敗 (Anima など)",
+    level: "warn",
+    log: /stack expects each tensor to be equal size, but got \[1, \d+, \d+\]/,
+    cause:
+      "LLM 系のテキストエンコーダ (Anima の Qwen など) はプロンプトごとにトークン数が変わる。バッチ数 2 以上で Dynamic Prompts によって画像ごとにプロンプトが変わると、長さを揃えて stack する prompt_parser.stack_conds の処理が shape[0] しか見ておらず、[1, N, dim] の cond を揃えられずに落ちる (Forge 側のバグ)。Forge は動き続ける",
+    remedy: "バッチ数を 1 にする (n_iter で枚数を稼ぐ)。または、バッチ内でプロンプトが変わらないように書く",
+    seen: ["2026-10-04: Anima・バッチ 2・Dynamic Prompts で [1, 1267, 1024] と [1, 1260, 1024]"],
+  },
+  {
     id: "port-in-use",
     title: "ポートが使用中 (二重起動)",
     level: "crash",
