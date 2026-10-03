@@ -55,8 +55,11 @@ export function App() {
   return (
     <>
       <header className="mx-auto flex max-w-xl items-center justify-between px-4 pt-[max(0.9rem,env(safe-area-inset-top))] pb-2">
-        <div className="font-serif text-2xl tracking-wide">
-          SD-Ru<span className="text-accent">i</span>z
+        <div className="flex items-center gap-2 font-serif text-2xl tracking-wide">
+          <img src="/favicon.svg" alt="" width={36} height={36} className="block size-9" />
+          <span>
+            SD-Ru<span className="text-accent">i</span>z
+          </span>
         </div>
         <ForgeBadge status={status} serverDown={serverDown} />
       </header>
