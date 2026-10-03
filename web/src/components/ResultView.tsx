@@ -51,22 +51,30 @@ export function ResultView({ job, last, progress }: { job: JobView | null; last:
     </div>
   );
 
+  // 生成中も前回の生成時間を出したままにし、生成が終わった時点で新しい値に切り替える
+  const duration = last?.finishedAt && (
+    <p className="text-right font-mono text-[11px] text-muted">生成時間 {formatDuration(last.finishedAt - last.startedAt)}</p>
+  );
+
   if (job?.status === "running") {
     // 完成したときと同じ並び・大きさの枠を置き、その上にライブプレビュー (バッチのときは全部まとめた 1 枚) を重ねる
     return (
-      <div className="relative mt-4">
-        {tiles(Math.max(1, job.params.batch), job.params, (i) =>
-          !progress?.preview && i < count ? (
-            <button className="block size-full" onClick={() => open(i)}>
-              <img src={urls[i]} alt={`前回の生成結果 ${i + 1}`} className="size-full object-contain opacity-35" onLoad={() => onLoaded(urls[i])} />
+      <div className="mt-4 space-y-3">
+        <div className="relative">
+          {tiles(Math.max(1, job.params.batch), job.params, (i) =>
+            !progress?.preview && i < count ? (
+              <button className="block size-full" onClick={() => open(i)}>
+                <img src={urls[i]} alt={`前回の生成結果 ${i + 1}`} className="size-full object-contain opacity-35" onLoad={() => onLoaded(urls[i])} />
+              </button>
+            ) : null,
+          )}
+          {progress?.preview && (
+            <button className="absolute inset-0 overflow-hidden rounded-2xl bg-surface" onClick={() => open(0)}>
+              <img src={progress.preview} alt="生成中のプレビュー" className="size-full object-contain" />
             </button>
-          ) : null,
-        )}
-        {progress?.preview && (
-          <button className="absolute inset-0 overflow-hidden rounded-2xl bg-surface" onClick={() => open(0)}>
-            <img src={progress.preview} alt="生成中のプレビュー" className="size-full object-contain" />
-          </button>
-        )}
+          )}
+        </div>
+        {duration}
         {viewer}
       </div>
     );
@@ -95,7 +103,7 @@ export function ResultView({ job, last, progress }: { job: JobView | null; last:
               </div>
             )}
           </div>
-          {last.finishedAt && <p className="text-right font-mono text-[11px] text-muted">生成時間 {formatDuration(last.finishedAt - last.startedAt)}</p>}
+          {duration}
         </>
       )}
       {viewer}
