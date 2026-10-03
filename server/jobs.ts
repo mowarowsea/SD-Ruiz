@@ -108,7 +108,9 @@ export class JobManager {
       sampler_name: p.sampler,
       scheduler: p.scheduler,
       seed: p.seed,
-      batch_size: p.batch,
+      // 枚数は 1 枚ずつ n_iter で作る。batch_size を増やすと、LLM 系の TE (Anima) でプロンプトの長さが画像ごとに違うときに Forge が落ちる (forge-knowledge の llm-te-batch-stack)
+      batch_size: 1,
+      n_iter: p.batch,
       save_images: p.save,
       // Checkpoint と TE / VAE は生成時に切り替え、そのまま Forge 側の選択として残す。
       // TE / VAE は要らないモデルでも [] を毎回送る (送らないと前に使った Anima の TE / VAE が残る)。

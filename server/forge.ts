@@ -45,6 +45,7 @@ export interface Txt2ImgRequest {
   scheduler: string;
   seed: number;
   batch_size: number;
+  n_iter: number;
   save_images: boolean;
   override_settings: Record<string, unknown>;
   override_settings_restore_afterwards: boolean;

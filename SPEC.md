@@ -109,6 +109,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - TE / VAE は Forge の `models/VAE`・`models/text_encoder` のファイル (`/sdapi/v1/sd-modules`) から選ぶ (複数可)。Forge に無いものは赤くする
 - 組み込みの既定: Anima はパラメータ 832×1216 · 32 Steps · CFG 4 · ER SDE · Beta (Forge Neo のプリセットに合わせた)、TE / VAE は `qwen_3_06b_base.safetensors` と `qwen_image_vae.safetensors`。ほかのベースモデルは既定なし (パラメータは生成画面の値のまま、TE / VAE は指定なし)。自分で変えた項目だけ prefs に入り、「組み込みに戻す」で消せる
 - 生成のたびに、モデルに合わせた TE / VAE を `override_settings.forge_additional_modules` で Forge に渡す。要らないモデルでも `[]` を送る (送らないと前に使った Anima の TE / VAE が Forge に残る)
+- 枚数 (Batch) は `batch_size: 1, n_iter: N` で Forge に送り、1 枚ずつ作る。batch_size を増やすと、Anima などの LLM 系 TE で、Dynamic Prompts によって画像ごとにプロンプトの長さが違うと Forge が落ちる (`stack expects each tensor to be equal size`)。Forge 本体で生成していたときも n_iter だった
 - 生成の前に BFF が確かめ、だめなら Forge に送らずにエラーを出す (Forge は知らないファイル名を黙って捨て、知らない Checkpoint なら読み込み中のモデルで生成してしまうため)
   - Checkpoint が Forge に無い
   - 選んだ TE / VAE が Forge に無い (Forge は起動したときにしか一覧を読まないので、ファイルを足したら Forge の再起動が要る)
