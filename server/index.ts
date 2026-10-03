@@ -12,9 +12,10 @@ import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./f
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
+import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.js";
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
-import { PrefsStore } from "./prefs.js";
+import { type ModelParams, PrefsStore } from "./prefs.js";
 import { Wildcards } from "./wildcards.js";
 
 const cfg = loadConfig();
@@ -121,7 +122,8 @@ server.get("/api/meta", async () => {
     current,
     models: models.map((m) => {
       const sc = sidecars.get(m.filename);
-      return { title: m.title, name: m.model_name, base: sc.base, preview: !!sc.preview, mtime: sc.mtime };
+      const family = familyOf(sc.base);
+      return { title: m.title, name: m.model_name, base: sc.base, family, arch: archOf(family), preview: !!sc.preview, mtime: sc.mtime };
     }),
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
@@ -185,7 +187,8 @@ server.get("/api/loras", async () => {
       .map((l) => {
         const rel = l.path.split(root).pop() ?? l.name;
         const sc = sidecars.get(l.path);
-        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/"), base: sc.base, trainedWords: sc.trainedWords, preview: !!sc.preview, mtime: sc.mtime };
+        const family = familyOf(sc.base);
+        return { name: l.name, alias: l.alias, folder: rel.split(/[\\/]/).slice(0, -1).join("/"), base: sc.base, family, arch: archOf(family), trainedWords: sc.trainedWords, preview: !!sc.preview, mtime: sc.mtime };
       })
       .sort((a, b) => a.name.localeCompare(b.name)),
   };
@@ -288,8 +291,60 @@ server.get<{ Params: { kind: string }; Querystring: { path: string; t: string } 
     .send(Buffer.from(await res.arrayBuffer()));
 });
 
-// 端末をまたいで共有する設定
-server.get("/api/prefs", async () => prefs.value);
+// 端末をまたいで共有する設定。bases はベースモデルごとの既定 (組み込みか自分で変えたものがあるものだけ。無いものは params: null, modules: [])
+function prefsView() {
+  const p = prefs.value;
+  const families = new Set([...Object.keys(builtinBaseSettings), ...Object.keys(p.baseSettings)]);
+  const bases = Object.fromEntries(
+    [...families].map((f) => [f, { ...prefs.baseSettings(f), custom: { params: p.baseSettings[f]?.params !== undefined, modules: p.baseSettings[f]?.modules !== undefined } }]),
+  );
+  return { ...p, bases };
+}
+
+server.get("/api/prefs", async () => prefsView());
+
+// TE / VAE に選べるファイル。folder は "VAE" / "text_encoder" など
+server.get("/api/modules", async () => ({
+  modules: (await forge.modules())
+    .map((m) => ({ name: m.model_name, folder: m.filename.split(/[\\/]/).slice(-2, -1)[0] ?? "" }))
+    .sort((a, b) => a.name.localeCompare(b.name)),
+}));
+
+const modelParamsSchema = {
+  type: ["object", "null"],
+  required: ["width", "height", "steps", "cfg", "sampler", "scheduler"],
+  properties: {
+    width: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 8 },
+    height: { type: "integer", minimum: 64, maximum: 4096, multipleOf: 8 },
+    steps: { type: "integer", minimum: 1, maximum: 150 },
+    cfg: { type: "number", minimum: 0, maximum: 30 },
+    sampler: { type: "string" },
+    scheduler: { type: "string" },
+  },
+};
+const modulesSchema = { type: ["array", "null"], items: { type: "string" } };
+
+// ベースモデルの既定を変える (null の項目は組み込みの既定に戻す)
+server.put<{ Body: { family: string; params?: ModelParams | null; modules?: string[] | null } }>(
+  "/api/prefs/base",
+  { schema: { body: { type: "object", required: ["family"], properties: { family: { type: "string", minLength: 1 }, params: modelParamsSchema, modules: modulesSchema } } } },
+  async (req) => {
+    const { family, ...patch } = req.body;
+    prefs.setBase(family, patch);
+    return prefsView();
+  },
+);
+
+// モデルごとの設定を変える (null の項目は消してベースモデルの既定に戻す)
+server.put<{ Body: { id: string; params?: null; modules?: string[] | null } }>(
+  "/api/prefs/model",
+  { schema: { body: { type: "object", required: ["id"], properties: { id: { type: "string", minLength: 1 }, params: { type: "null" }, modules: modulesSchema } } } },
+  async (req) => {
+    const { id, ...patch } = req.body;
+    prefs.setModel(id, patch);
+    return prefsView();
+  },
+);
 
 server.put<{ Body: { kind: "checkpoint" | "lora"; id: string; on: boolean } }>(
   "/api/prefs/favorite",
@@ -304,7 +359,7 @@ server.put<{ Body: { kind: "checkpoint" | "lora"; id: string; on: boolean } }>(
   },
   async (req) => {
     prefs.setFavorite(req.body.kind, req.body.id, req.body.on);
-    return prefs.value;
+    return prefsView();
   },
 );
 
@@ -330,8 +385,39 @@ const generateSchema = {
   },
 };
 
+/** 設定が足りなくて生成できないとき (400 で返す) */
+class SetupError extends Error {
+  readonly statusCode = 400;
+}
+
+/**
+ * このモデルで使う TE / VAE を決め、Forge にあるか確かめる。
+ * Forge は見つからないファイル名を黙って捨て、TE が無いまま読み込もうとして分かりにくい落ち方をするので、先に止める
+ */
+async function resolveModules(checkpoint: string): Promise<string[]> {
+  if (!checkpointPaths.has(checkpoint)) await fetchModels();
+  const file = checkpointPaths.get(checkpoint);
+  // 知らない名前だと Forge は黙っていま読み込んでいるモデルで生成するので、ここで止める
+  if (!file) throw new SetupError(`Checkpoint が見つかりません: ${checkpoint}`);
+  const family = familyOf(sidecars.get(file).base);
+  const modules = prefs.modulesFor(checkpoint, family);
+  const label = family ?? "このモデル";
+  if (!modules.length) {
+    if (archNeedsModules.has(archOf(family) ?? "")) throw new SetupError(`${label} は Text Encoder と VAE を別に指定しないと使えません。Extras の「モデルの設定」で選んでください`);
+    return [];
+  }
+  const have = new Set((await forge.modules()).map((m) => m.model_name));
+  const missing = modules.filter((m) => !have.has(m));
+  if (missing.length)
+    throw new SetupError(
+      `${label} に使う Text Encoder / VAE が Forge にありません: ${missing.join(", ")}。` +
+        "models/text_encoder か models/VAE に置いて Forge を再起動するか (Forge は起動したときにしか一覧を読みません)、Extras の「モデルの設定」で選び直してください",
+    );
+  return modules;
+}
+
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {
-  const job = jobs.start(req.body);
+  const job = jobs.start(req.body, await resolveModules(req.body.checkpoint));
   prefs.recordGenerate(req.body);
   return { id: job.id };
 });

@@ -50,6 +50,10 @@ export interface Model {
   name: string;
   /** "Illustrious" / "Pony" / "SD 1.5" など */
   base: string | null;
+  /** 設定をまとめる単位にそろえたベースモデル名 ("Illustrious" / "Pony" / "SDXL" / "Anima" ...) */
+  family: string | null;
+  /** 中身の構造 ("sdxl" / "sd1" / "anima" ...)。同じなら LoRA が使える */
+  arch: string | null;
   preview: boolean;
   /** ファイルの更新日時 (ms) */
   mtime: number;
@@ -93,6 +97,8 @@ export interface Lora {
   alias: string;
   folder: string;
   base: string | null;
+  family: string | null;
+  arch: string | null;
   trainedWords: string[];
   preview: boolean;
   mtime: number;
@@ -100,11 +106,31 @@ export interface Lora {
 
 export type ModelParams = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler">;
 
+/** ベースモデルごとの既定。custom は自分で変えた項目 (変えていなければ組み込みの既定) */
+export interface BaseSettings {
+  params: ModelParams | null;
+  modules: string[];
+  custom: { params: boolean; modules: boolean };
+}
+
 export interface Prefs {
   favoriteCheckpoints: string[];
   favoriteLoras: string[];
   recentCheckpoints: string[];
   modelParams: Record<string, ModelParams>;
+  modelModules: Record<string, string[]>;
+  bases: Record<string, BaseSettings>;
+}
+
+/** ベースモデルの既定 (組み込みも自分の設定も無ければ空) */
+export function baseSettingsOf(prefs: Prefs | null, family: string | null): BaseSettings {
+  return (family && prefs?.bases[family]) || { params: null, modules: [], custom: { params: false, modules: false } };
+}
+
+/** TE / VAE に選べるファイル。folder は "VAE" / "text_encoder" など */
+export interface ForgeModule {
+  name: string;
+  folder: string;
 }
 
 export interface JobView {
@@ -201,6 +227,13 @@ export const api = {
   prefs: () => request<Prefs>("/api/prefs"),
   setFavorite: (kind: "checkpoint" | "lora", id: string, on: boolean) =>
     request<Prefs>("/api/prefs/favorite", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id, on }) }),
+  /** null の項目は組み込みの既定に戻す */
+  setBaseSettings: (family: string, patch: { params?: ModelParams | null; modules?: string[] | null }) =>
+    request<Prefs>("/api/prefs/base", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ family, ...patch }) }),
+  /** null の項目は消してベースモデルの既定に戻す */
+  setModelSettings: (id: string, patch: { params?: null; modules?: string[] | null }) =>
+    request<Prefs>("/api/prefs/model", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...patch }) }),
+  modules: () => request<{ modules: ForgeModule[] }>("/api/modules"),
   /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
   deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
@@ -271,6 +304,7 @@ export function baseLabel(base: string | null) {
   if (/pony/i.test(base)) return "Pony";
   if (/sdxl/i.test(base)) return "XL";
   if (/flux/i.test(base)) return "Flux";
+  if (/anima/i.test(base)) return "Anima";
   const m = /^SD ?(\d(?:\.\d)?)/i.exec(base);
   return m ? m[1] : base;
 }

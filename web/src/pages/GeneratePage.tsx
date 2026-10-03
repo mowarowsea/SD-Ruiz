@@ -1,5 +1,5 @@
 import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
-import { api, baseLabel, type ForgeStatus, type GenerateParams, type Meta, modelFolder, modelLabel, type Progress } from "../api";
+import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { LoraChips } from "../components/LoraChips";
 import { LoraSheet } from "../components/LoraSheet";
@@ -8,7 +8,7 @@ import { addLora, findLoras, removeLora } from "../prompt/lora";
 import { PromptEditor } from "../components/PromptEditor";
 import { ParamsAccordion } from "../components/ParamsAccordion";
 import { ResultView } from "../components/ResultView";
-import { type useJob, usePrefs } from "../hooks";
+import { type useJob, type usePrefs } from "../hooks";
 
 export function GeneratePage({
   meta,
@@ -16,6 +16,7 @@ export function GeneratePage({
   form,
   setForm,
   jobState,
+  prefsState,
   onCheckpointDeleted,
 }: {
   meta: Meta | null;
@@ -23,21 +24,36 @@ export function GeneratePage({
   form: GenerateParams;
   setForm: Dispatch<SetStateAction<GenerateParams>>;
   jobState: ReturnType<typeof useJob>;
+  prefsState: ReturnType<typeof usePrefs>;
   onCheckpointDeleted: (title: string) => void;
 }) {
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
   const { job, last, progress, refresh } = jobState;
-  const { prefs, reload: reloadPrefs, setFavorite } = usePrefs();
+  const { prefs, reload: reloadPrefs, setFavorite } = prefsState;
   const [sheet, setSheet] = useState<"checkpoint" | "lora" | null>(null);
   const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
   const model = meta?.models.find((m) => m.title === form.checkpoint);
 
-  // モデルを切り替えたら、そのモデルで最後に使ったパラメータに戻す
+  // モデルを切り替えたら、そのモデルで最後に使ったパラメータに戻す。まだ使ったことが無ければベースモデルの既定にする
   const [restored, setRestored] = useState<string | null>(null);
   const selectCheckpoint = (checkpoint: string) => {
-    const saved = prefs?.modelParams[checkpoint];
+    const mine = prefs?.modelParams[checkpoint];
+    const family = meta?.models.find((m) => m.title === checkpoint)?.family ?? null;
+    const saved = mine ?? baseSettingsOf(prefs, family).params;
     patch({ checkpoint, ...saved });
-    setRestored(saved ? `前回の設定に戻しました: ${saved.width}×${saved.height} · ${saved.steps}st · CFG ${saved.cfg} · ${saved.sampler}` : null);
+    const summary = saved && `${saved.width}×${saved.height} · ${saved.steps}st · CFG ${saved.cfg} · ${saved.sampler}`;
+    setRestored(mine ? `前回の設定に戻しました: ${summary}` : saved ? `${family} の既定にしました: ${summary}` : null);
+  };
+
+  // 使っている LoRA がこのモデルに合うか (ベースモデルの構造が違うと効かない)。どちらかが分からなければ合うことにする
+  const [loras, setLoras] = useState<Lora[] | null>(null);
+  useEffect(() => {
+    if (!loras && usedLoras.size) loadLoras().then(setLoras, () => {});
+  }, [loras, usedLoras]);
+  const loraProblem = (name: string) => {
+    const l = loras?.find((x) => x.name === name);
+    if (!l?.arch || !model?.arch || l.arch === model.arch) return null;
+    return `${l.family} 用の LoRA なので ${model.family} では効きません`;
   };
   useEffect(() => {
     if (!restored) return;
@@ -107,7 +123,7 @@ export function GeneratePage({
 
       <Label>Prompt</Label>
       <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" />
-      <LoraChips prompt={form.prompt} onChange={(prompt) => patch({ prompt })} onAdd={() => setSheet("lora")} />
+      <LoraChips prompt={form.prompt} onChange={(prompt) => patch({ prompt })} onAdd={() => setSheet("lora")} problem={loraProblem} />
 
       <Label>Negative</Label>
       <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" />
@@ -157,6 +173,8 @@ export function GeneratePage({
         open={sheet === "lora"}
         onClose={() => setSheet(null)}
         used={usedLoras}
+        arch={model?.arch ?? null}
+        family={model?.family ?? null}
         prefs={prefs}
         onToggle={(l) => toggleLora(l.name)}
         onFavorite={(id, on) => setFavorite("lora", id, on)}

@@ -1,4 +1,4 @@
-import { faBroom, faHeartPulse, faImages, faLanguage, faPuzzlePiece, faShuffle, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
+import { faBroom, faCubes, faHeartPulse, faImages, faLanguage, faPuzzlePiece, faShuffle, faWandMagicSparkles } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { type MouseEvent, useState } from "react";
@@ -6,11 +6,12 @@ import { useTyping } from "../hooks";
 import { MenuItem, PopMenu } from "./PopMenu";
 
 /** 画面。cleanup などのおまけ機能は Extras メニューから開く */
-export type Tab = "generate" | "gallery" | "cleanup" | "wildcards" | "translations" | "forge";
-export const tabs: Tab[] = ["generate", "gallery", "cleanup", "wildcards", "translations", "forge"];
+export type Tab = "generate" | "gallery" | "models" | "cleanup" | "wildcards" | "translations" | "forge";
+export const tabs: Tab[] = ["generate", "gallery", "models", "cleanup", "wildcards", "translations", "forge"];
 
 /** id が null のものは準備中 */
 const extras: { id: Tab | null; icon: IconDefinition; label: string }[] = [
+  { id: "models", icon: faCubes, label: "モデルの設定" },
   { id: "cleanup", icon: faBroom, label: "ギャラリー整理" },
   { id: "wildcards", icon: faShuffle, label: "ワイルドカード" },
   { id: "translations", icon: faLanguage, label: "タグの訳" },

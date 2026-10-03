@@ -2,9 +2,10 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, type ForgeStatus, type GenerateParams, type Meta } from "./api";
 import { defaultForm, toForm } from "./form";
 import { BottomNav, type Tab, tabs } from "./components/BottomNav";
-import { useForgeStatus, useJob, usePersistentState } from "./hooks";
+import { useForgeStatus, useJob, usePersistentState, usePrefs } from "./hooks";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
+import { ModelSettingsPage } from "./pages/ModelSettingsPage";
 import { CleanupPage } from "./pages/CleanupPage";
 import { ForgePage } from "./pages/ForgePage";
 import { TranslationsPage } from "./pages/TranslationsPage";
@@ -17,6 +18,7 @@ export function App() {
   const { status, starting, launcher, serverDown, refresh: refreshStatus } = useForgeStatus();
   const [meta, setMeta] = useState<Meta | null>(null);
   const jobState = useJob();
+  const prefsState = usePrefs();
   const galleryOpened = useRef(false);
   if (nav.tab === "gallery") galleryOpened.current = true;
   // ワイルドカードも編集中の内容を失わないよう保持する
@@ -94,6 +96,7 @@ export function App() {
             form={form}
             setForm={setForm}
             jobState={jobState}
+            prefsState={prefsState}
             onCheckpointDeleted={(title) => setMeta((m) => m && { ...m, models: m.models.filter((x) => x.title !== title) })}
           />
         </div>
@@ -109,6 +112,7 @@ export function App() {
           </div>
         )}
         {nav.tab === "translations" && <TranslationsPage />}
+        {nav.tab === "models" && <ModelSettingsPage meta={meta} form={form} prefsState={prefsState} />}
         {nav.tab === "forge" && <ForgePage status={status} starting={starting} launcher={launcher} onChanged={refreshStatus} />}
       </main>
 

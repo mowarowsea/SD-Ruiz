@@ -87,19 +87,39 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
 - プレビュー画像つきのカードを 2 列で並べるボトムシート。検索と、すべて / お気に入り / 最近 / フォルダ での絞り込み
 - 並びは新しい順 (ファイルの更新日時の降順) が既定で、名前順に切り替えられる (LoRA も同じ。選んだ並びは端末ごとに覚える)
 - プレビュー画像はモデルの横にある `*.preview.png` などを BFF が縮小 (sharp, 384px webp) して返す。縮小版は `cache/thumbs/` にキャッシュ
-- ベースモデルのバッジ (IL / Pony / XL / 1.5 / Flux ...)。StabilityMatrix の `cm-info.json` か Civitai Helper の `civitai.info` から読み、無ければ safetensors のヘッダから推定する
+- ベースモデルのバッジ (IL / Pony / XL / 1.5 / Flux / Anima ...)。StabilityMatrix の `cm-info.json` か Civitai Helper の `civitai.info` から読み、無ければ safetensors のヘッダから推定する
+  - Anima は Checkpoint なら `llm_adapter`、LoRA なら `blocks.N.self_attn.q_proj` (kohya 形式は `_` 区切り) のテンソル名で見分ける
+  - ベースモデル名は設定の単位 (Illustrious / NoobAI / Pony / SDXL / SD 1.5 / Flux / Anima ...) にそろえ、さらに中身の構造 (sdxl / sd1 / anima ...) を持つ。Illustrious・NoobAI・Pony・SDXL はどれも sdxl
 - お気に入り (☆)、最近使ったもの (生成したモデルの新しい順 8 件)
-- モデルごとに前回のパラメータ (サイズ / Steps / CFG / Sampler / Scheduler) を記憶し、切り替え時に復元する (復元したことを一言表示)
-- お気に入り・最近・モデルごとのパラメータは BFF の `data/prefs.json` に保存し、端末をまたいで共有する
+- モデルを選んだときの設定は二段構え (3.3.1)。モデルごとの設定があればそれ、無ければベースモデルの既定を使う
+  - モデルごとに前回のパラメータ (サイズ / Steps / CFG / Sampler / Scheduler) を記憶し、切り替え時に復元する (復元したことを一言表示)。前回の値が無ければベースモデルの既定のパラメータにする (「Anima の既定にしました」)
+- お気に入り・最近・モデルごとの設定・ベースモデルの既定は BFF の `data/prefs.json` に保存し、端末をまたいで共有する
 - 削除: シート右上の「削除」で削除モードにし、カードをタップすると確認してから消す (LoRA も同じ)
   - 本体と付随ファイル (プレビュー画像・`cm-info.json`・`civitai.info`・`.json`) をゴミ箱フォルダの `models/Stable-diffusion/` (LoRA は `models/Lora/`) へ移し、Forge に一覧を読み直してもらう (`refresh-checkpoints` / `refresh-loras`)
   - 生成中は消さない。Forge が開いていて動かせないときはエラーを出して何もしない
   - お気に入り・最近・モデルごとのパラメータからも外す
 
+### 3.3.1 モデルの設定 (Extras)
+- 二段構え
+  - ベースモデルごと (Illustrious / Pony / Anima ...): 既定のパラメータと Text Encoder / VAE
+  - モデルごと: 前回のパラメータ (生成したときに自動で覚える) と、個別に指定した Text Encoder / VAE
+  - モデルごとの設定があればそれ、無ければベースモデルの既定を使う
+- ベースモデルごとのカードに、既定のパラメータ・TE / VAE・そのベースモデルのモデルの一覧 (前回の値と TE / VAE の個別指定) を出す
+  - 既定のパラメータは、生成画面で値を決めてから「今の生成画面の値にする」で決める。モデルの前回の値は「忘れる」で消す (ベースモデルの既定に戻る)
+  - TE / VAE は Forge の `models/VAE`・`models/text_encoder` のファイル (`/sdapi/v1/sd-modules`) から選ぶ (複数可)。Forge に無いものは赤くする
+- 組み込みの既定: Anima はパラメータ 832×1216 · 32 Steps · CFG 4 · ER SDE · Beta (Forge Neo のプリセットに合わせた)、TE / VAE は `qwen_3_06b_base.safetensors` と `qwen_image_vae.safetensors`。ほかのベースモデルは既定なし (パラメータは生成画面の値のまま、TE / VAE は指定なし)。自分で変えた項目だけ prefs に入り、「組み込みに戻す」で消せる
+- 生成のたびに、モデルに合わせた TE / VAE を `override_settings.forge_additional_modules` で Forge に渡す。要らないモデルでも `[]` を送る (送らないと前に使った Anima の TE / VAE が Forge に残る)
+- 生成の前に BFF が確かめ、だめなら Forge に送らずにエラーを出す (Forge は知らないファイル名を黙って捨て、知らない Checkpoint なら読み込み中のモデルで生成してしまうため)
+  - Checkpoint が Forge に無い
+  - 選んだ TE / VAE が Forge に無い (Forge は起動したときにしか一覧を読まないので、ファイルを足したら Forge の再起動が要る)
+  - Anima なのに TE / VAE が指定されていない (Checkpoint に DiT しか入っていない)
+
 ### 3.4 LoRA
+- 一覧には今のモデルに合うもの (中身の構造が同じもの。どちらかが分からなければ合うことにする) だけを出し、合わずに出していない件数を一言出す
 - ボトムシートで検索 (名前・トリガーワード) と、すべて / お気に入り / 使用中 / フォルダ での絞り込み。プレビュー・ベースモデル・トリガーワードを表示
 - タップでプロンプト末尾に `<lora:name:1>` を足す / もう一度タップで外す。シートは開いたままで続けて選べる
 - 使用中の LoRA は Prompt の下にチップで表示し、重みは数値を手打ちで変える (× で外す)
+  - 今のモデルに合わない LoRA のチップは赤くし、下に理由 (「SD 1.5 用の LoRA なので SDXL では効きません」) を出す
 
 ### 3.4.1 ワイルドカード編集 (Extras)
 - Dynamic Prompts の wildcards ディレクトリ (`<forgeDir>/extensions/sd-dynamic-prompts/wildcards`、フォルダ階層あり) の .txt を一覧・編集・新規作成・名前変更・削除

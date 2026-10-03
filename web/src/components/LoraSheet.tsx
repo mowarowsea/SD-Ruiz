@@ -6,11 +6,16 @@ import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChip
 
 type Filter = "all" | "fav" | "used" | `folder:${string}`;
 
-/** LoRA 選択。タップでプロンプトに足す / 外す (続けて何個でも選べるよう、シートは開いたまま)。削除モードではタップで削除する */
+/**
+ * LoRA 選択。タップでプロンプトに足す / 外す (続けて何個でも選べるよう、シートは開いたまま)。削除モードではタップで削除する。
+ * 今のモデルに合うもの (ベースモデルの構造が同じもの。どちらかが分からなければ合うことにする) だけを出す
+ */
 export function LoraSheet({
   open,
   onClose,
   used,
+  arch,
+  family,
   prefs,
   onToggle,
   onFavorite,
@@ -20,6 +25,9 @@ export function LoraSheet({
   onClose: () => void;
   /** プロンプトで使用中の LoRA 名 */
   used: Set<string>;
+  /** 今のモデルの構造 ("sdxl" / "anima" ...) とベースモデル名 */
+  arch: string | null;
+  family: string | null;
   prefs: Prefs | null;
   onToggle: (lora: Lora) => void;
   onFavorite: (name: string, on: boolean) => void;
@@ -50,7 +58,9 @@ export function LoraSheet({
     if (open && !loras) loadLoras().then(setLoras, (e) => setError((e as Error).message));
   }, [open, loras]);
 
-  const folders = useMemo(() => [...new Set((loras ?? []).map((l) => l.folder))].filter(Boolean).sort(), [loras]);
+  const fits = useMemo(() => (loras ?? []).filter((l) => !arch || !l.arch || l.arch === arch), [loras, arch]);
+  const hidden = (loras?.length ?? 0) - fits.length;
+  const folders = useMemo(() => [...new Set(fits.map((l) => l.folder))].filter(Boolean).sort(), [fits]);
   const chips = [
     { id: "all" as Filter, label: "すべて" },
     { id: "fav" as Filter, label: "★ お気に入り" },
@@ -59,7 +69,7 @@ export function LoraSheet({
   ];
 
   const q = query.toLowerCase();
-  const filtered = (loras ?? []).filter(
+  const filtered = fits.filter(
     (l) =>
       (l.name.toLowerCase().includes(q) || l.alias.toLowerCase().includes(q) || l.trainedWords.some((w) => w.toLowerCase().includes(q))) &&
       (filter === "all" || (filter === "fav" && favs.has(l.name)) || (filter === "used" && used.has(l.name)) || (filter.startsWith("folder:") && l.folder === filter.slice(7))),
@@ -73,7 +83,7 @@ export function LoraSheet({
       title="LoRA"
       aside={
         <span className="flex items-center gap-2">
-          {loras && `${loras.length} LoRA`}
+          {loras && `${fits.length} LoRA`}
           <DeleteModeButton on={deleting} onChange={setDeleting} />
         </span>
       }
@@ -84,6 +94,11 @@ export function LoraSheet({
       </div>
       <FilterChips items={chips} value={filter} onChange={setFilter} />
       {error && <p className="py-4 text-sm text-danger">{error}</p>}
+      {hidden > 0 && (
+        <p className="mb-2 text-[11px] text-muted">
+          {family ?? "このモデル"} に合わない {hidden} 件は出していません
+        </p>
+      )}
       {deleteError && <p className="mb-3 text-xs break-words text-danger">{deleteError}</p>}
       {!loras && !error && <p className="py-8 text-center text-sm text-muted">読み込み中…</p>}
       <ul className="space-y-1.5">

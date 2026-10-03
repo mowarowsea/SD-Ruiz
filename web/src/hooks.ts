@@ -77,7 +77,7 @@ export function useJob() {
   return { ...state, refresh: poll };
 }
 
-/** 端末をまたいで共有する設定 (お気に入り・最近使ったモデル・モデルごとのパラメータ) */
+/** 端末をまたいで共有する設定 (お気に入り・最近使ったモデル・ベースモデルとモデルごとの設定)。生成画面と Extras で共有する */
 export function usePrefs() {
   const [prefs, setPrefs] = useState<Prefs | null>(null);
   const reload = useCallback(() => api.prefs().then(setPrefs, () => {}), []);
@@ -91,7 +91,7 @@ export function usePrefs() {
     });
     api.setFavorite(kind, id, on).then(setPrefs, () => void reload());
   }, [reload]);
-  return { prefs, reload, setFavorite };
+  return { prefs, reload, setFavorite, setPrefs };
 }
 
 /** キーボードが出る入力欄 (CodeMirror のプロンプト欄は contenteditable) */

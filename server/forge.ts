@@ -123,6 +123,11 @@ export class ForgeClient {
     return this.get<ForgeLora[]>("/sdapi/v1/loras", 30_000);
   }
 
+  /** 「VAE / Text Encoder」に選べるファイル (models/VAE と models/text_encoder)。Forge は起動時にしか読み直さない */
+  modules() {
+    return this.get<{ model_name: string; filename: string }[]>("/sdapi/v1/sd-modules");
+  }
+
   /** モデルのフォルダを読み直してもらう (ファイルを消したあとなど) */
   async refreshCheckpoints() {
     await this.post("/sdapi/v1/refresh-checkpoints", {}, 60_000);

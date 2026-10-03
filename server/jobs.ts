@@ -25,6 +25,8 @@ export interface Job {
   id: string;
   status: "running" | "done" | "error";
   params: GenerateParams;
+  /** Forge の「VAE / Text Encoder」に渡したファイル名 (Checkpoint とベースモデルの設定から決まる) */
+  modules: string[];
   startedAt: number;
   finishedAt?: number;
   images: Buffer[];
@@ -54,7 +56,7 @@ function loadLast(): Job | null {
     const meta = JSON.parse(readFileSync(`${lastDir}/job.json`, "utf8")) as Omit<Job, "images">;
     const count = readdirSync(lastDir).filter((f) => /^\d+\.png$/.test(f)).length;
     const images = Array.from({ length: count }, (_, i) => readFileSync(`${lastDir}/${i}.png`));
-    return { ...meta, images };
+    return { ...meta, modules: meta.modules ?? [], images };
   } catch {
     return null;
   }
@@ -80,9 +82,9 @@ export class JobManager {
     return [this.job, this.lastSuccess].find((j) => j?.id === id) ?? null;
   }
 
-  start(params: GenerateParams): Job {
+  start(params: GenerateParams, modules: string[]): Job {
     if (this.job?.status === "running") throw new JobBusyError("生成中です");
-    const job: Job = { id: randomUUID(), status: "running", params, startedAt: Date.now(), images: [], seeds: [], prompts: [], interrupted: false };
+    const job: Job = { id: randomUUID(), status: "running", params, modules, startedAt: Date.now(), images: [], seeds: [], prompts: [], interrupted: false };
     this.job = job;
     void this.run(job);
     return job;
@@ -108,9 +110,10 @@ export class JobManager {
       seed: p.seed,
       batch_size: p.batch,
       save_images: p.save,
-      // Checkpoint は生成時に切り替え、そのまま Forge 側の選択として残す。
+      // Checkpoint と TE / VAE は生成時に切り替え、そのまま Forge 側の選択として残す。
+      // TE / VAE は要らないモデルでも [] を毎回送る (送らないと前に使った Anima の TE / VAE が残る)。
       // dp_write_raw_template: 書いたままのプロンプトを PNG に Template として残す (# のコメントは Dynamic Prompts が消すため、これが無いと to t2i で戻せない)
-      override_settings: { sd_model_checkpoint: p.checkpoint, dp_write_raw_template: true },
+      override_settings: { sd_model_checkpoint: p.checkpoint, forge_additional_modules: job.modules, dp_write_raw_template: true },
       override_settings_restore_afterwards: false,
     };
     try {

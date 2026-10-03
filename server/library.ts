@@ -50,7 +50,10 @@ function guessBase(modelPath: string): string | null {
     if (/sdxl/i.test(v)) return "SDXL";
     if (/sd_?v?1/i.test(v)) return "SD 1.5";
     if (/flux/i.test(v)) return "Flux";
+    if (/anima/i.test(v)) return "Anima";
     if (text.includes("double_blocks")) return "Flux";
+    // Anima (Cosmos-Predict2 系の DiT)。Checkpoint は llm_adapter、LoRA は blocks.N.self_attn.q_proj (kohya 形式は _ 区切り) で見分ける
+    if (text.includes("llm_adapter") || /blocks[._]\d+[._](self|cross)_attn[._][qkv]_proj/.test(text)) return "Anima";
     if (text.includes("joint_blocks")) return "SD 3";
     if (text.includes("conditioner.embedders.1") || text.includes("lora_te2_")) return "SDXL";
     if (text.includes("cond_stage_model.") || text.includes("lora_te_")) return "SD 1.5";
