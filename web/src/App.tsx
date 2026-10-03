@@ -88,7 +88,14 @@ export function App() {
         )}
         {/* 生成とギャラリーは一度開いたら保持しておく (入力中の内容やスクロール位置を失わない) */}
         <div hidden={nav.tab !== "generate"}>
-          <GeneratePage meta={meta} forge={status} form={form} setForm={setForm} jobState={jobState} />
+          <GeneratePage
+            meta={meta}
+            forge={status}
+            form={form}
+            setForm={setForm}
+            jobState={jobState}
+            onCheckpointDeleted={(title) => setMeta((m) => m && { ...m, models: m.models.filter((x) => x.title !== title) })}
+          />
         </div>
         {(nav.tab === "gallery" || galleryOpened.current) && (
           <div hidden={nav.tab !== "gallery"}>

@@ -1,3 +1,5 @@
+import { faDice, faLock } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useState } from "react";
 import type { GenerateParams, Meta } from "../api";
 import { NumberField } from "./NumberField";
@@ -16,6 +18,7 @@ export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Pa
         <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted">
           {value.width}×{value.height} · {value.steps}st · CFG {value.cfg} · {value.sampler} · ×{value.batch}
         </span>
+        <SeedMark seed={value.seed} />
         <span className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
 
@@ -60,8 +63,8 @@ export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Pa
             label="Seed"
             action={
               <span className="flex gap-3">
-                <button className="text-accent" onClick={() => onChange({ seed: -1 })}>
-                  🎲
+                <button className="text-accent" onClick={() => onChange({ seed: -1 })} aria-label="ランダムにする">
+                  <FontAwesomeIcon icon={faDice} /> ランダム
                 </button>
                 <button className="text-accent disabled:opacity-40" disabled={lastSeed === null} onClick={() => lastSeed !== null && onChange({ seed: lastSeed })}>
                   ♻ 前回
@@ -77,6 +80,20 @@ export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Pa
         </div>
       )}
     </div>
+  );
+}
+
+/** 畳んだ状態でも Seed が固定かどうか分かるように。固定は忘れがちなので色を付けて目立たせる */
+function SeedMark({ seed }: { seed: number }) {
+  const fixed = seed !== -1;
+  return (
+    <span
+      className={`flex flex-none items-center gap-1 rounded-full px-2 py-0.5 text-[11px] ${fixed ? "bg-accent/15 text-accent" : "bg-surface2 text-muted"}`}
+      title={fixed ? `Seed 固定: ${seed}` : "Seed ランダム"}
+    >
+      <FontAwesomeIcon icon={fixed ? faLock : faDice} className="text-[10px]" />
+      {fixed ? "固定" : "ランダム"}
+    </span>
   );
 }
 

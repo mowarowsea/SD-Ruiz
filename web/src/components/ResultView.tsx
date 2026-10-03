@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { api, type JobView, type Progress } from "../api";
 import { ImageViewer } from "./ImageViewer";
 
@@ -21,36 +21,51 @@ export function ResultView({ job, last, progress }: { job: JobView | null; last:
   const total = last?.imageCount ?? 0;
   const skip = last && total > last.seeds.length && last.seeds.length > 1 ? 1 : 0;
   const count = total - skip;
-  const urls = last ? Array.from({ length: count }, (_, i) => api.imageUrl(last.id, i + skip)) : [];
+  // 画面もビューアも同じ WebP を使う (画面で読み込み済みなので、ビューアは通信なしで開く)
+  const urls = last ? Array.from({ length: count }, (_, i) => api.imageViewUrl(last.id, i + skip)) : [];
   const open = (i: number) => count > 0 && setViewing(i);
+
+  // 生成が終わっても、新しい画像が読み込み終わるまでは最後のライブプレビューを出したままにする (一瞬空になってちらつかないように)
+  const [held, setHeld] = useState<{ id: string; src: string } | null>(null);
+  const [loaded, setLoaded] = useState<Set<string>>(() => new Set());
+  const runningId = job?.status === "running" ? job.id : null;
+  const preview = progress?.preview ?? null;
+  useEffect(() => {
+    if (runningId && preview) setHeld({ id: runningId, src: preview });
+  }, [runningId, preview]);
+  const onLoaded = (url: string) => setLoaded((s) => (s.has(url) ? s : new Set(s).add(url)));
+  const holding = !runningId && held !== null && held.id === last?.id && !urls.every((u) => loaded.has(u));
 
   const viewer = viewing !== null && count > 0 && (
     <ImageViewer images={urls} index={Math.min(viewing, count - 1)} onIndex={setViewing} onClose={() => setViewing(null)} />
   );
 
-  const thumbs = (dim: boolean) => (
-    <div className={count > 1 ? "grid grid-cols-2 gap-2" : ""}>
-      {urls.map((url, i) => (
-        <figure key={url} className="relative overflow-hidden rounded-2xl border border-line bg-surface">
-          <button className="block w-full" onClick={() => open(i)}>
-            <img src={url} alt={`生成結果 ${i + 1}`} className={`w-full transition-opacity ${dim ? "opacity-35" : ""}`} />
-          </button>
+  // 枠は生成サイズの縦横比で先に高さを取っておく (画像の読み込み前や、生成中 → 完了で高さが変わってガタつかないように)
+  const tiles = (n: number, params: { width: number; height: number }, tile: (i: number) => ReactNode) => (
+    <div className={n > 1 ? "grid grid-cols-2 gap-2" : ""}>
+      {Array.from({ length: n }, (_, i) => (
+        <figure key={i} className="relative overflow-hidden rounded-2xl border border-line bg-surface" style={{ aspectRatio: `${params.width} / ${params.height}` }}>
+          {tile(i)}
         </figure>
       ))}
     </div>
   );
 
   if (job?.status === "running") {
+    // 完成したときと同じ並び・大きさの枠を置き、その上にライブプレビュー (バッチのときは全部まとめた 1 枚) を重ねる
     return (
-      <div className="mt-4">
-        {progress?.preview ? (
-          <button className="block w-full overflow-hidden rounded-2xl border border-line bg-surface" onClick={() => open(0)}>
-            <img src={progress.preview} alt="生成中のプレビュー" className="mx-auto max-h-[60vh] w-auto" />
+      <div className="relative mt-4">
+        {tiles(Math.max(1, job.params.batch), job.params, (i) =>
+          !progress?.preview && i < count ? (
+            <button className="block size-full" onClick={() => open(i)}>
+              <img src={urls[i]} alt={`前回の生成結果 ${i + 1}`} className="size-full object-contain opacity-35" onLoad={() => onLoaded(urls[i])} />
+            </button>
+          ) : null,
+        )}
+        {progress?.preview && (
+          <button className="absolute inset-0 overflow-hidden rounded-2xl bg-surface" onClick={() => open(0)}>
+            <img src={progress.preview} alt="生成中のプレビュー" className="size-full object-contain" />
           </button>
-        ) : count > 0 ? (
-          thumbs(true)
-        ) : (
-          <div className="h-40 rounded-2xl border border-line bg-surface" />
         )}
         {viewer}
       </div>
@@ -68,7 +83,18 @@ export function ResultView({ job, last, progress }: { job: JobView | null; last:
         <>
           {(failed || interruptedEmpty) && <p className="text-[11px] text-muted">最後に成功した結果:</p>}
           {last.interrupted && last.id === job?.id && <p className="text-xs text-muted">中断しました (途中までの結果)</p>}
-          {thumbs(false)}
+          <div className="relative">
+            {tiles(count, last.params, (i) => (
+              <button className="block size-full" onClick={() => open(i)}>
+                <img src={urls[i]} alt={`生成結果 ${i + 1}`} className="size-full object-contain" onLoad={() => onLoaded(urls[i])} onError={() => onLoaded(urls[i])} />
+              </button>
+            ))}
+            {holding && (
+              <div className="absolute inset-0 overflow-hidden rounded-2xl bg-surface">
+                <img src={held.src} alt="" className="size-full object-contain" />
+              </div>
+            )}
+          </div>
           {last.finishedAt && <p className="text-right font-mono text-[11px] text-muted">生成時間 {formatDuration(last.finishedAt - last.startedAt)}</p>}
         </>
       )}

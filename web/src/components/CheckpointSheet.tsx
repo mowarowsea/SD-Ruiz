@@ -2,11 +2,11 @@ import { useMemo, useState } from "react";
 import { baseLabel, type Model, modelFolder, modelLabel, type Prefs } from "../api";
 import { Sheet } from "./Sheet";
 import { usePersistentState } from "../hooks";
-import { BaseBadge, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
+import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
 
 type Filter = "all" | "fav" | "recent" | `folder:${string}`;
 
-/** Checkpoint 選択。プレビューつきのカードを 2 列で並べる */
+/** Checkpoint 選択。プレビューつきのカードを 2 列で並べる。削除モードではタップで (確認してから) 削除する */
 export function CheckpointSheet({
   open,
   onClose,
@@ -15,6 +15,7 @@ export function CheckpointSheet({
   prefs,
   onSelect,
   onFavorite,
+  onDeleted,
 }: {
   open: boolean;
   onClose: () => void;
@@ -23,10 +24,18 @@ export function CheckpointSheet({
   prefs: Prefs | null;
   onSelect: (title: string) => void;
   onFavorite: (title: string, on: boolean) => void;
+  onDeleted: (title: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
   const [sort, setSort] = usePersistentState("ruiz.sort.checkpoint", { by: "mtime" as SortBy });
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const close = () => {
+    setDeleting(false);
+    setError(null);
+    onClose();
+  };
   const favs = new Set(prefs?.favoriteCheckpoints ?? []);
   const recent = prefs?.recentCheckpoints ?? [];
 
@@ -50,23 +59,40 @@ export function CheckpointSheet({
   }, [models, query, filter, prefs, sort.by]);
 
   return (
-    <Sheet open={open} onClose={onClose} title="Checkpoint" aside={`${models.length} models`}>
+    <Sheet
+      open={open}
+      onClose={close}
+      title="Checkpoint"
+      aside={
+        <span className="flex items-center gap-2">
+          {models.length} models
+          <DeleteModeButton on={deleting} onChange={setDeleting} />
+        </span>
+      }
+    >
       <div className="flex gap-2">
         <input className="field min-w-0 flex-1 text-sm" placeholder="🔍 モデルを検索" value={query} onChange={(e) => setQuery(e.target.value)} />
         <SortButton value={sort.by} onChange={(by) => setSort({ by })} />
       </div>
       <FilterChips items={chips} value={filter} onChange={setFilter} />
+      {error && <p className="mb-3 text-xs break-words text-danger">{error}</p>}
       <ul className="grid grid-cols-2 gap-2.5">
         {shown.map((m) => (
           <li key={m.title} className="relative">
             <button
-              onClick={() => {
-                onSelect(m.title);
-                onClose();
+              onClick={async () => {
+                if (!deleting) {
+                  onSelect(m.title);
+                  close();
+                } else if (await confirmDeleteModel("checkpoint", m.title, setError)) {
+                  setError(null);
+                  onDeleted(m.title);
+                }
               }}
-              className={`relative block w-full overflow-hidden rounded-2xl border text-left ${m.title === value ? "border-accent ring-1 ring-accent" : "border-line"}`}
+              className={`relative block w-full overflow-hidden rounded-2xl border text-left ${deleting ? "border-danger/60" : m.title === value ? "border-accent ring-1 ring-accent" : "border-line"}`}
             >
               <Thumb kind="checkpoint" id={m.title} has={m.preview} className="aspect-[3/4] w-full" />
+              {deleting && <DeleteMark className="absolute inset-0" />}
               <BaseBadge label={baseLabel(m.base)} className="absolute top-2 left-2" />
               <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent px-2.5 pt-6 pb-2">
                 <div className="line-clamp-2 text-[12px] leading-tight font-semibold break-all text-white">{modelLabel(m.title)}</div>
@@ -74,7 +100,7 @@ export function CheckpointSheet({
               </div>
             </button>
             {/* ボタンの入れ子にならないよう、カードの外に重ねる */}
-            <Star on={favs.has(m.title)} onClick={() => onFavorite(m.title, !favs.has(m.title))} className="absolute top-0.5 right-0.5 drop-shadow" />
+            {!deleting && <Star on={favs.has(m.title)} onClick={() => onFavorite(m.title, !favs.has(m.title))} className="absolute top-0.5 right-0.5 drop-shadow" />}
           </li>
         ))}
       </ul>

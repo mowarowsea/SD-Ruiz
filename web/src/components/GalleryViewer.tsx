@@ -1,8 +1,10 @@
 import { faCircleInfo, faClone, faFileArrowDown, faTags, faTrashCan } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
-import { type MouseEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { api, type GalleryFile, type GalleryInfo, type GalleryTag, type GenerateParams, type Meta } from "../api";
+import { usePersistentState } from "../hooks";
+import { type Change, diffInfotext } from "../infodiff";
 import { infotextToParams, parseInfotext } from "../infotext";
 import { ImageViewer } from "./ImageViewer";
 import { MenuItem, PopMenu } from "./PopMenu";
@@ -12,7 +14,8 @@ import { PromptEditor } from "./PromptEditor";
  * ギャラリーの画像詳細。ビューアの操作 (左右で送る・真ん中で閉じる) に、下部の操作バーを重ねる。
  * Grid 表示では grid → その元画像 → 次の grid … の順に送る (items は並べ終わったもの)。
  * grid のタグは元画像にも同じように付け外しされ、削除も元画像ごとゴミ箱フォルダへ移る。
- * タグを付けると grid と元画像が保管庫 (Saved) へ移り、全部外すと出力フォルダへ戻る
+ * タグを付けると grid と元画像が保管庫 (Saved) へ移り、全部外すと出力フォルダへ戻る。
+ * 上部には 1 つ前 (古い方) の生成から変えたところを小さく出す (タップで情報パネル)
  */
 export function GalleryViewer({
   items,
@@ -51,18 +54,39 @@ export function GalleryViewer({
   const tags = file?.tags ?? info?.tags ?? [];
   // ビューアを閉じ終わってから (履歴を戻してから) 実行したい処理
   const afterClose = useRef<(() => void) | null>(null);
+  const [diffView, setDiffView] = usePersistentState("ruiz.gallery.diff", { overlay: true });
 
+  // 比べるのは grid / 単体画像どうし。grid の元画像を見ているときはその grid で比べる
+  // (grid のプロンプトは Dynamic Prompts の展開前、元画像は展開後なので、混ぜると違いだらけになる)
+  const subject = useMemo(() => (file && items.find((f) => f.sources?.some((s) => s.path === file.path))) ?? file, [items, file]);
+  const sourcePaths = useMemo(() => new Set(items.flatMap((f) => f.sources?.map((s) => s.path) ?? [])), [items]);
+  const prevFile = useMemo(() => subject && items.slice(items.indexOf(subject) + 1).find((f) => !sourcePaths.has(f.path)), [items, subject, sourcePaths]);
+  const subjectInfo = subject && infos[subject.path];
+  const prevInfo = prevFile && infos[prevFile.path];
+  const changes = useMemo(
+    () => (subjectInfo && prevInfo ? diffInfotext(parseInfotext(subjectInfo.geninfo), parseInfotext(prevInfo.geninfo)) : null),
+    [subjectInfo, prevInfo],
+  );
+
+  const requested = useRef(new Set<string>());
   useEffect(() => {
     setMessage(null);
     setMenu(null);
-    if (!file || infos[file.path]) return;
-    api.galleryInfo(file.path, kind).then(
-      (i) => setInfos((m) => ({ ...m, [file.path]: i })),
-      (e) => setMessage({ text: (e as Error).message, error: true }),
-    );
+    if (!file) return;
+    for (const f of [file, subject, prevFile]) {
+      if (!f || requested.current.has(f.path)) continue;
+      requested.current.add(f.path);
+      api.galleryInfo(f.path, f.grid ? "grid" : "image").then(
+        (i) => setInfos((m) => ({ ...m, [f.path]: i })),
+        (e) => {
+          requested.current.delete(f.path);
+          if (f === file) setMessage({ text: (e as Error).message, error: true });
+        },
+      );
+    }
     if (index >= items.length - 6) onNearEnd();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [file?.path]);
+  }, [file?.path, prevFile?.path]);
 
   if (!file) return null;
   const has = (t: GalleryTag) => tags.some((x) => x.id === t.id);
@@ -142,12 +166,34 @@ export function GalleryViewer({
             {new Date(file.mtime).toLocaleString("sv-SE")} · {file.saved && "保管庫 · "}
             {file.name}
           </div>
+          {diffView.overlay && changes && !panel && (
+            <button
+              onClick={() => setPanel(true)}
+              aria-label="前の生成との違い"
+              className="absolute inset-x-0 top-[calc(max(0.75rem,env(safe-area-inset-top))+1.1rem)] mx-auto w-fit max-w-[min(36rem,calc(100%-5rem))] rounded-lg bg-black/45 px-2 py-0.5 text-left text-[11px] leading-snug text-white/75 backdrop-blur-sm"
+            >
+              <ChangeSummary changes={changes} />
+            </button>
+          )}
 
           {panel && (
             <div className="absolute inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] mx-auto max-h-[62%] max-w-xl overflow-y-auto rounded-t-2xl border-t border-line bg-bg/95 p-4 backdrop-blur">
               {!parsed && <p className="text-sm text-muted">読み込み中…</p>}
               {parsed && (
                 <>
+                  {changes && (
+                    <Section
+                      title="前の生成との違い"
+                      aside={
+                        <label className="flex items-center gap-1.5 normal-case">
+                          <input type="checkbox" checked={diffView.overlay} onChange={(e) => setDiffView({ overlay: e.target.checked })} className="accent-accent" />
+                          画像の上に出す
+                        </label>
+                      }
+                    >
+                      <ChangeDetails changes={changes} />
+                    </Section>
+                  )}
                   <Section title="Prompt">
                     <PromptEditor key={`${file.path}-p`} value={prompt ?? ""} readOnly />
                   </Section>
@@ -210,10 +256,13 @@ export function GalleryViewer({
   );
 }
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+function Section({ title, aside, children }: { title: string; aside?: ReactNode; children: ReactNode }) {
   return (
     <div className="mb-3 last:mb-0">
-      <div className="mb-1 text-[10px] tracking-wider text-muted uppercase">{title}</div>
+      <div className="mb-1 flex items-center justify-between text-[10px] tracking-wider text-muted uppercase">
+        {title}
+        {aside}
+      </div>
       {children}
     </div>
   );
@@ -225,5 +274,89 @@ function BarButton({ icon, label, onClick, active = false, disabled = false }: {
       <FontAwesomeIcon icon={icon} className="text-lg" />
       {label}
     </button>
+  );
+}
+
+const short = (v: string | undefined, n = 28) => (v === undefined ? "—" : v.length > n ? `${v.slice(0, n - 1)}…` : v);
+
+/** 画像の上に出す 1〜2 行の要約。パラメータ → プロンプトの順 */
+function ChangeSummary({ changes }: { changes: Change[] }) {
+  if (!changes.length) return <span className="text-white/45">前と同じ設定 (Seed 以外)</span>;
+  return (
+    <span className="line-clamp-2 break-words">
+      {changes.map((c, i) => (
+        <span key={i} className="mr-2">
+          {c.kind === "param" ? (
+            <>
+              <span className="text-white/50">{c.key}</span> {short(c.from)}→<span className="text-white">{short(c.to)}</span>
+            </>
+          ) : (
+            <>
+              {c.kind === "negative" && <span className="text-white/50">Neg </span>}
+              {c.added.length + c.removed.length > 8 ? (
+                // 多すぎると要約にならないので数だけ (中身は情報パネルで)
+                <span className="mr-1">
+                  {c.kind === "prompt" && <span className="text-white/50">Prompt </span>}
+                  <span className="text-ok">+{c.added.length}</span> <span className="text-danger">−{c.removed.length}</span>
+                </span>
+              ) : (
+                [
+                  ...c.added.map((t) => (
+                    <span key={`+${t}`} className="mr-1 text-ok">
+                      +{short(t, 24)}
+                    </span>
+                  )),
+                  ...c.removed.map((t) => (
+                    <span key={`-${t}`} className="mr-1 text-danger">
+                      −{short(t, 24)}
+                    </span>
+                  )),
+                ]
+              )}
+              {c.reweighted.map((r) => (
+                <span key={`~${r.tag}`} className="mr-1 text-[#e8c27a]">
+                  {short(r.tag, 24)} {r.from}→{r.to}
+                </span>
+              ))}
+            </>
+          )}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** 情報パネルの中の全部入り */
+function ChangeDetails({ changes }: { changes: Change[] }) {
+  if (!changes.length) return <p className="text-xs text-muted">前と同じ設定です (Seed 以外)</p>;
+  return (
+    <div className="space-y-1 font-mono text-[11px]">
+      {changes.map((c, i) =>
+        c.kind === "param" ? (
+          <div key={i} className="break-all">
+            <span className="text-muted">{c.key}</span> {c.from ?? "—"} → <span className="text-accent">{c.to ?? "—"}</span>
+          </div>
+        ) : (
+          <div key={i} className="break-all">
+            <span className="text-muted">{c.kind === "prompt" ? "Prompt" : "Negative"}</span>{" "}
+            {c.added.map((t) => (
+              <span key={`+${t}`} className="mr-1.5 text-ok">
+                +{t}
+              </span>
+            ))}
+            {c.removed.map((t) => (
+              <span key={`-${t}`} className="mr-1.5 text-danger">
+                −{t}
+              </span>
+            ))}
+            {c.reweighted.map((r) => (
+              <span key={`~${r.tag}`} className="mr-1.5 text-[#e8c27a]">
+                {r.tag} {r.from}→{r.to}
+              </span>
+            ))}
+          </div>
+        ),
+      )}
+    </div>
   );
 }

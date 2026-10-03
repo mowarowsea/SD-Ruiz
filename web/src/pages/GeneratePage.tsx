@@ -16,12 +16,14 @@ export function GeneratePage({
   form,
   setForm,
   jobState,
+  onCheckpointDeleted,
 }: {
   meta: Meta | null;
   forge: ForgeStatus | null;
   form: GenerateParams;
   setForm: Dispatch<SetStateAction<GenerateParams>>;
   jobState: ReturnType<typeof useJob>;
+  onCheckpointDeleted: (title: string) => void;
 }) {
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
   const { job, last, progress, refresh } = jobState;
@@ -56,19 +58,34 @@ export function GeneratePage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meta]);
 
-  const running = job?.status === "running";
+  // 押したらすぐ生成中の表示にする (前の画像の読み込みで回線が詰まっていると、受け付けの応答が遅れて押せたのか分からなくなるので)
+  const [submitting, setSubmitting] = useState(false);
+  const running = job?.status === "running" || submitting;
   const canGenerate = !!forge?.online && !!form.checkpoint && !running;
 
   const generate = async () => {
     setSubmitError(null);
+    setSubmitting(true);
     try {
       await api.generate(form);
-      refresh();
+      await refresh();
       void reloadPrefs();
     } catch (e) {
       setSubmitError((e as Error).message);
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  // 進捗は 1 回の生成の中では戻さない (終わり際に Forge が 0 を返すとバーが右から左へ縮んで、エラーで戻ったように見えるので)。
+  // 始まった直後は前の生成の値が残っていることがあるので、ステップが進み始めるまでは使わない
+  const [seen, setSeen] = useState({ id: "", ratio: 0, stepped: false });
+  const cur = running && job && seen.id === job.id ? seen : { id: job?.id ?? "", ratio: 0, stepped: false };
+  const stepped = cur.stepped || (progress?.step ?? 0) > 0;
+  const ratio = stepped ? Math.max(cur.ratio, progress?.ratio ?? 0) : 0;
+  useEffect(() => {
+    if (running && job && (seen.id !== job.id || seen.ratio !== ratio || seen.stepped !== stepped)) setSeen({ id: job.id, ratio, stepped });
+  }, [running, job, ratio, stepped, seen]);
 
   const lastSeed = last?.seeds.length ? last.seeds[0] : null;
 
@@ -99,16 +116,14 @@ export function GeneratePage({
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} />
       </div>
 
-      <ResultView job={job} last={last} progress={progress} />
-
-      {/* 生成ボタン (生成画像の下。下に固定するとスマホでプロンプトを打つときにキーボードと重なって邪魔なので) */}
-      <div className="mt-3">
+      {/* 生成ボタン (生成画像の上。下に固定するとスマホでプロンプトを打つときにキーボードと重なって邪魔なので) */}
+      <div className="mt-4">
         {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
         {running ? (
           <div className="flex gap-2">
             <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
-              <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round((progress?.ratio ?? 0) * 100)}%` }} />
-              <span className="relative">{runningLabel(progress)}</span>
+              <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round(ratio * 100)}%` }} />
+              <span className="relative">{job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
             </div>
             <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
               中断
@@ -121,6 +136,8 @@ export function GeneratePage({
         )}
       </div>
 
+      <ResultView job={job} last={last} progress={progress} />
+
       {meta && (
         <CheckpointSheet
           open={sheet === "checkpoint"}
@@ -130,6 +147,10 @@ export function GeneratePage({
           prefs={prefs}
           onSelect={selectCheckpoint}
           onFavorite={(id, on) => setFavorite("checkpoint", id, on)}
+          onDeleted={(title) => {
+            onCheckpointDeleted(title);
+            void reloadPrefs();
+          }}
         />
       )}
       <LoraSheet
@@ -139,15 +160,16 @@ export function GeneratePage({
         prefs={prefs}
         onToggle={(l) => toggleLora(l.name)}
         onFavorite={(id, on) => setFavorite("lora", id, on)}
+        onDeleted={() => void reloadPrefs()}
       />
     </div>
   );
 }
 
-/** 生成中のボタンの表示 (モデルの読み込み中はステップがまだ進まない) */
-function runningLabel(progress: Progress | null) {
+/** 生成中のボタンの表示 (始まる前のモデルの読み込み中と、終わり際の VAE デコード・保存中はステップが 0) */
+function runningLabel(progress: Progress | null, stepped: boolean) {
   if (!progress) return "生成中…";
-  if (progress.step === 0) return "モデルを準備中…";
+  if (progress.step === 0) return stepped ? "仕上げ中…" : "準備中…";
   return progress.steps > 0 ? `生成中 ${progress.step} / ${progress.steps}` : "生成中…";
 }
 

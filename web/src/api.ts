@@ -201,6 +201,8 @@ export const api = {
   prefs: () => request<Prefs>("/api/prefs"),
   setFavorite: (kind: "checkpoint" | "lora", id: string, on: boolean) =>
     request<Prefs>("/api/prefs/favorite", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id, on }) }),
+  /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
+  deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
   gallery: (opts: { kind: GalleryKind; offset?: number; q?: string; tag?: number | "none" | "any" | null }) => {
     const p = new URLSearchParams({ kind: opts.kind });
@@ -220,7 +222,8 @@ export const api = {
   migrateTagged: () => post<{ moved: number }>("/api/cleanup/migrate-tagged", {}),
   trash: () => request<{ dir: string; files: number; bytes: number }>("/api/trash"),
   emptyTrash: () => post<{ ok: boolean }>("/api/trash/empty", {}),
-  imageUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}`,
+  /** 生成画面とビューアで見る用の軽い WebP (原寸の PNG は Forge の保存ファイルにある) */
+  imageViewUrl: (jobId: string, index: number) => `/api/job/${jobId}/image/${index}?view=1`,
   forgeStart: () => post<{ pid: number }>("/api/forge/start", {}),
   forgeRestart: () => post<{ pid: number }>("/api/forge/restart", {}),
   forgeDiagnose: () => request<Diagnosis>("/api/forge/diagnose"),
@@ -253,6 +256,11 @@ export function loadLoras(): Promise<Lora[]> {
       lorasCache = null;
       throw e;
     }));
+}
+
+/** 消した LoRA をキャッシュからも外す */
+export function forgetLora(name: string) {
+  lorasCache = lorasCache?.then((ls) => ls.filter((l) => l.name !== name)) ?? null;
 }
 
 /** ベースモデル名をバッジ用に短くする */

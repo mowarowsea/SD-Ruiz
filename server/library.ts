@@ -2,7 +2,8 @@
 
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, statSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
@@ -61,8 +62,10 @@ function guessBase(modelPath: string): string | null {
   }
 }
 
+const stemOf = (modelPath: string) => modelPath.replace(/\.(safetensors|ckpt|pt|gguf)$/i, "");
+
 export function readSidecar(modelPath: string): Sidecar {
-  const stem = modelPath.replace(/\.(safetensors|ckpt|pt|gguf)$/i, "");
+  const stem = stemOf(modelPath);
   const preview = previewSuffixes.map((s) => stem + s).find((p) => existsSync(p)) ?? null;
   // StabilityMatrix の cm-info.json を優先し、無ければ Civitai Helper の civitai.info
   const cm = readJson(`${stem}.cm-info.json`);
@@ -104,4 +107,29 @@ export async function thumbnail(previewPath: string, width = 384): Promise<Buffe
   mkdirSync(thumbDir, { recursive: true });
   await writeFile(cached, buf);
   return buf;
+}
+
+/**
+ * モデルファイルを付随ファイル (プレビュー・メタデータ) ごとゴミ箱フォルダの dest/ へ移す。
+ * 付随ファイルは名前が決まっているものだけ (「foo.」で始まる別のモデル foo.v2.safetensors を巻き込まない)
+ */
+export async function moveModelToTrash(modelPath: string, dest: string) {
+  const stem = stemOf(modelPath);
+  const sidecars = [...previewSuffixes, ".cm-info.json", ".civitai.info", ".json"].map((s) => stem + s).filter((p) => p !== modelPath && existsSync(p));
+  // 同じ名前を前にも捨てていたら日時を付けたフォルダに分ける
+  if (existsSync(join(dest, basename(modelPath)))) dest = join(dest, new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19));
+  await mkdir(dest, { recursive: true });
+  // 本体を先に動かす。読み込み中で動かせなければここで失敗し、付随ファイルも残る
+  for (const p of [modelPath, ...sidecars]) {
+    const to = join(dest, basename(p));
+    try {
+      await rename(p, to);
+    } catch (e) {
+      // 別のドライブなら rename できないので、コピーしてから消す
+      if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw e;
+      await copyFile(p, to);
+      await unlink(p);
+    }
+  }
+  return { files: 1 + sidecars.length };
 }

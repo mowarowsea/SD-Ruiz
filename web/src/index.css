@@ -26,6 +26,18 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* PC で出るスクロールバーを細く、テーマの色にする (スマホは元から重ねて出るので影響しない)。
+   チップの行などの [scrollbar-width:none] が勝つよう base レイヤーに置く */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  *:hover {
+    scrollbar-color: var(--color-muted) transparent;
+  }
+}
+
 /* 入力欄の共通スタイル */
 @utility field {
   background: var(--color-surface);

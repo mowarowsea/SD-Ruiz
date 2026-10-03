@@ -61,7 +61,14 @@ export function splitSessions(log: string): { label: string; startedAt: number; 
   return sessions;
 }
 
-/** 読みやすい末尾: ネイティブのスタックは 1 行に畳み、VRAM の警告と空行は除く */
+/** ログの末尾だけ見て、最後の起動のあとプロセスが終わったか (webui.bat の pause が出たか) */
+export function exitedSinceLastStart(tail: string) {
+  const lines = tail.split(/\r?\n/);
+  const head = lines.findLastIndex((l) => /^(起動|再起動): \d{4}-\d\d-\d\d /.test(l));
+  return lines.slice(head + 1).some((l) => exitMarker.test(l));
+}
+
+/** 読みやすい末尾:ネイティブのスタックは 1 行に畳み、VRAM の警告と空行は除く */
 function readableTail(lines: string[], n: number) {
   const out: string[] = [];
   let frames = 0;

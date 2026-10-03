@@ -123,6 +123,15 @@ export class ForgeClient {
     return this.get<ForgeLora[]>("/sdapi/v1/loras", 30_000);
   }
 
+  /** モデルのフォルダを読み直してもらう (ファイルを消したあとなど) */
+  async refreshCheckpoints() {
+    await this.post("/sdapi/v1/refresh-checkpoints", {}, 60_000);
+  }
+
+  async refreshLoras() {
+    await this.post("/sdapi/v1/refresh-loras", {}, 60_000);
+  }
+
   async currentCheckpoint(): Promise<string | null> {
     const opts = await this.get<{ sd_model_checkpoint?: string | null }>("/sdapi/v1/options");
     return opts.sd_model_checkpoint ?? null;

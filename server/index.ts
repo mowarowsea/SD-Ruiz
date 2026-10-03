@@ -4,15 +4,16 @@ import { fileURLToPath } from "node:url";
 import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
+import sharp from "sharp";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { TagDictionary } from "./dictionary.js";
-import { analyze, currentWarnings, windowsInfo } from "./forge-doctor.js";
+import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./forge-doctor.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
 import { Launcher } from "./launcher.js";
-import { SidecarCache, thumbnail } from "./library.js";
+import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
 import { PrefsStore } from "./prefs.js";
 import { Wildcards } from "./wildcards.js";
 
@@ -48,8 +49,7 @@ server.setErrorHandler((err, _req, reply) => {
 // LocalLauncher のヘルスチェック用。SD-Ruiz 自体が動いていれば 200 (Forge の状態は body で返す)
 server.get("/api/health", async () => {
   const status = await forge.status();
-  if (status.online) startRequestedAt = 0;
-  return { ok: true, forge: status, starting: !status.online && Date.now() - startRequestedAt < startTimeout, launcher: !!launcher.baseUrl };
+  return { ok: true, forge: status, starting: await isStarting(status.online), launcher: !!launcher.baseUrl };
 });
 
 // ---- Forge の起動と診断 ----
@@ -58,9 +58,18 @@ server.get("/api/health", async () => {
 let startRequestedAt = 0;
 const startTimeout = 4 * 60_000;
 
+/** 起動を頼んで、まだ応答も終了もしていない。起動中に落ちたらログの pause で気づいて解除する */
+async function isStarting(online: boolean) {
+  if (online) startRequestedAt = 0;
+  if (Date.now() - startRequestedAt >= startTimeout) return false;
+  if (exitedSinceLastStart(await launcher.log(200).catch(() => ""))) startRequestedAt = 0;
+  return startRequestedAt !== 0;
+}
+
 server.post("/api/forge/start", async (_req, reply) => {
-  if ((await forge.status()).online) return reply.code(409).send({ error: "Forge はもう動いています" });
-  if (Date.now() - startRequestedAt < startTimeout) return reply.code(409).send({ error: "起動中です。少し待ってください" });
+  const { online } = await forge.status();
+  if (online) return reply.code(409).send({ error: "Forge はもう動いています" });
+  if (await isStarting(online)) return reply.code(409).send({ error: "起動中です。少し待ってください" });
   const r = await launcher.start();
   startRequestedAt = Date.now();
   return r;
@@ -194,6 +203,33 @@ server.get<{ Params: { kind: string }; Querystring: { id: string } }>("/api/thum
   return reply.type("image/webp").header("cache-control", "private, max-age=604800").send(await thumbnail(preview));
 });
 
+// Checkpoint / LoRA の削除: 付随ファイルごとゴミ箱フォルダの models/ へ移し、Forge に一覧を読み直してもらう
+server.post<{ Body: { kind: "checkpoint" | "lora"; id: string } }>(
+  "/api/models/delete",
+  { schema: { body: { type: "object", required: ["kind", "id"], properties: { kind: { enum: ["checkpoint", "lora"] }, id: { type: "string" } } } } },
+  async (req, reply) => {
+    const { kind, id } = req.body;
+    if (jobs.current?.status === "running") return reply.code(409).send({ error: "生成中です。終わってから消してください" });
+    const paths = kind === "checkpoint" ? checkpointPaths : loraPaths;
+    if (!paths.size) await (kind === "checkpoint" ? fetchModels() : fetchLoras());
+    const file = paths.get(id);
+    if (!file || !existsSync(file)) return reply.code(404).send({ error: `見つかりません: ${id}` });
+    const dest = join(await gallery.trashDir(), "models", kind === "checkpoint" ? "Stable-diffusion" : "Lora");
+    let r;
+    try {
+      r = await moveModelToTrash(file, dest);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException).code;
+      return reply.code(409).send({ error: code === "EBUSY" || code === "EPERM" ? "ファイルが使用中で動かせません (Forge が読み込んでいる可能性があります)" : (e as Error).message });
+    }
+    paths.delete(id);
+    sidecars.clear();
+    prefs.forget(kind, id);
+    await (kind === "checkpoint" ? forge.refreshCheckpoints() : forge.refreshLoras()).catch((e) => server.log.warn(e));
+    return r;
+  },
+);
+
 // ---- ギャラリー ----
 
 const kindSchema = { type: "string", enum: ["grid", "image"] };
@@ -325,7 +361,11 @@ server.get("/api/job", async () => {
   const job = jobs.current;
   const last = jobs.last && jobView(jobs.last);
   if (!job) return { job: null, progress: null, last };
-  if (job.status !== "running") return { job: jobView(job), progress: null, last };
+  if (job.status !== "running") {
+    // 画面がすぐ取りに来るので、表示用の WebP を先に作り始めておく
+    for (const img of jobs.last?.images ?? []) void viewImage(img).catch(() => {});
+    return { job: jobView(job), progress: null, last };
+  }
   const p = await forge.progress(true).catch(() => null);
   return {
     job: jobView(job),
@@ -340,9 +380,19 @@ server.get("/api/job", async () => {
   };
 });
 
-server.get<{ Params: { id: string; index: string } }>("/api/job/:id/image/:index", async (req, reply) => {
+// 生成画面とビューアで見る用の軽い WebP (PNG の原寸は 1 枚 2MB 近くあり、スマホの回線だと読み込みの間ほかの通信が詰まるため)。
+// 品質 92 で 150KB 前後。PSNR 42dB ほどで、画面のサイズではまず見分けがつかない
+const viewImages = new WeakMap<Buffer, Promise<Buffer>>();
+function viewImage(png: Buffer) {
+  let p = viewImages.get(png);
+  if (!p) viewImages.set(png, (p = sharp(png).webp({ quality: 92 }).toBuffer()));
+  return p;
+}
+
+server.get<{ Params: { id: string; index: string }; Querystring: { view?: string } }>("/api/job/:id/image/:index", async (req, reply) => {
   const image = jobs.find(req.params.id)?.images[Number(req.params.index)];
   if (!image) return reply.code(404).send({ error: "画像がありません" });
+  if (req.query.view) return reply.type("image/webp").header("cache-control", "private, max-age=86400").send(await viewImage(image));
   return reply.type("image/png").header("cache-control", "private, max-age=86400").send(image);
 });
 

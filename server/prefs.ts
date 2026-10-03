@@ -38,6 +38,17 @@ export class PrefsStore {
     this.save();
   }
 
+  /** 消したモデルをお気に入り・最近・パラメータの記憶から外す */
+  forget(kind: "checkpoint" | "lora", id: string) {
+    if (kind === "lora") this.prefs.favoriteLoras = this.prefs.favoriteLoras.filter((x) => x !== id);
+    else {
+      this.prefs.favoriteCheckpoints = this.prefs.favoriteCheckpoints.filter((x) => x !== id);
+      this.prefs.recentCheckpoints = this.prefs.recentCheckpoints.filter((x) => x !== id);
+      delete this.prefs.modelParams[id];
+    }
+    this.save();
+  }
+
   /** 生成したときに呼ぶ。最近使ったモデルとそのパラメータを覚える */
   recordGenerate(p: GenerateParams) {
     this.prefs.recentCheckpoints = [p.checkpoint, ...this.prefs.recentCheckpoints.filter((x) => x !== p.checkpoint)].slice(0, 8);

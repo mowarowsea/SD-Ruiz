@@ -108,8 +108,9 @@ export class JobManager {
       seed: p.seed,
       batch_size: p.batch,
       save_images: p.save,
-      // Checkpoint は生成時に切り替え、そのまま Forge 側の選択として残す
-      override_settings: { sd_model_checkpoint: p.checkpoint },
+      // Checkpoint は生成時に切り替え、そのまま Forge 側の選択として残す。
+      // dp_write_raw_template: 書いたままのプロンプトを PNG に Template として残す (# のコメントは Dynamic Prompts が消すため、これが無いと to t2i で戻せない)
+      override_settings: { sd_model_checkpoint: p.checkpoint, dp_write_raw_template: true },
       override_settings_restore_afterwards: false,
     };
     try {

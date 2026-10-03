@@ -103,13 +103,32 @@ function fileSeed(name: string) {
   return m ? Number(m[1]) : null;
 }
 
-/** フォルダ (日付フォルダを含む) の中の画像。フォルダの更新日時が変わっていなければ前回の結果を使う */
+/**
+ * フォルダ (日付フォルダを含む) の中の画像。フォルダの更新日時が変わっていなければ前回の結果を使う。
+ * 1 回の一覧で grid ごとに何十回も呼ばれるので、直近の走査結果は少しの間そのまま使い回す (移動・削除したら invalidate())
+ * 返す配列は呼び出し元で共有するので書き換えないこと
+ */
 class FolderScanner {
   private dirs = new Map<string, { mtime: number; files: GalleryFile[] }>();
+  private recent = new Map<string, { at: number; result: Promise<GalleryFile[]> }>();
 
-  async scan(roots: string[]): Promise<GalleryFile[]> {
+  scan(roots: string[]): Promise<GalleryFile[]> {
+    const k = roots.join("|");
+    const r = this.recent.get(k);
+    if (r && Date.now() - r.at < 3000) return r.result;
+    const result = this.walkAll(roots);
+    this.recent.set(k, { at: Date.now(), result });
+    result.catch(() => this.recent.delete(k));
+    return result;
+  }
+
+  invalidate() {
+    this.recent.clear();
+  }
+
+  private async walkAll(roots: string[]): Promise<GalleryFile[]> {
     const out: GalleryFile[] = [];
-    const walk = async (dir: string) => {
+    const walk = async (dir: string): Promise<void> => {
       let st;
       try {
         st = await stat(dir);
@@ -122,23 +141,26 @@ class FolderScanner {
       let files: GalleryFile[];
       if (cached && cached.mtime === st.mtimeMs) files = cached.files;
       else {
-        files = [];
-        for (const e of entries) {
-          if (!e.isFile() || !imageExt.test(e.name)) continue;
-          const p = join(dir, e.name);
-          try {
-            const s = await stat(p);
-            files.push({ path: p, name: e.name, mtime: s.mtimeMs, bytes: s.size });
-          } catch {
-            /* 途中で消えたファイル */
-          }
-        }
+        const found = await Promise.all(
+          entries
+            .filter((e) => e.isFile() && imageExt.test(e.name))
+            .map(async (e) => {
+              const p = join(dir, e.name);
+              try {
+                const s = await stat(p);
+                return { path: p, name: e.name, mtime: s.mtimeMs, bytes: s.size };
+              } catch {
+                return null; // 途中で消えたファイル
+              }
+            }),
+        );
+        files = found.filter((f) => f !== null);
         this.dirs.set(dir, { mtime: st.mtimeMs, files });
       }
       out.push(...files);
-      for (const d of subdirs) await walk(d);
+      await Promise.all(subdirs.map(walk));
     };
-    for (const r of roots) await walk(r);
+    await Promise.all(roots.map(walk));
     return out.sort((a, b) => b.mtime - a.mtime);
   }
 }
@@ -514,6 +536,7 @@ export class Gallery {
       mkdirSync(dirname(to), { recursive: true });
       renameSync(from, to);
     }
+    this.scanner.invalidate();
   }
 
   private async fileAt(path: string, saved: boolean): Promise<GalleryFile> {
@@ -631,6 +654,7 @@ export class Gallery {
         /* 使用中などで動かせなかったものは残す */
       }
     }
+    this.scanner.invalidate();
     return { moved, bytes };
   }
 
