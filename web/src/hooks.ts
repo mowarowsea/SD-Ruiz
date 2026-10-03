@@ -93,3 +93,65 @@ export function usePrefs() {
   }, [reload]);
   return { prefs, reload, setFavorite };
 }
+
+/** キーボードが出る入力欄 (CodeMirror のプロンプト欄は contenteditable) */
+const EDITABLE = 'textarea, [contenteditable="true"], .cm-editor, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="file"], [type="color"])';
+
+/**
+ * スマホで文字を打っている (キーボードが出ている) 間か。下部ナビを隠すのに使う。
+ * 入力欄にフォーカスが入った時点で true にし (キーボードと一緒にナビがせり上がらないよう先に隠す)、
+ * キーボードが閉じた (画面の高さが戻った) かフォーカスが外れたら false に戻す。
+ * フォーカスだけで判定すると、キーボードを閉じても編集欄にフォーカスが残る・戻ることがあり、ナビが出てこなくなるため
+ */
+export function useTyping() {
+  const [typing, setTyping] = useState(false);
+  useEffect(() => {
+    if (!matchMedia("(pointer: coarse)").matches) return;
+    const height = () => window.visualViewport?.height ?? window.innerHeight;
+    let width = window.innerWidth;
+    let base = height(); // キーボードが出ていないときの高さ (画面の向きが変わったら測り直す)
+    let open = false; // キーボードが出ているか
+    let timer = 0;
+    const isOpen = (h: number) => h < base - 120;
+    const editable = (t: EventTarget | null) => t instanceof Element && !!t.closest(EDITABLE);
+
+    // 触れただけ (pointerdown) で隠すと、入力欄の上からスクロールするたびにちらつくので、フォーカスとタップ (click) で見る。
+    // click は、戻るボタンでキーボードだけ閉じた後にもう一度タップしたとき用 (フォーカスは残っているので focusin が来ない)。
+    // click はスクロールでは起きない
+    const onStart = (e: Event) => {
+      if (!editable(e.target)) return;
+      setTyping(true);
+      // キーボードが出ないまま (外付けキーボードや、スクリプトでフォーカスが戻っただけなど) なら戻す
+      clearTimeout(timer);
+      timer = window.setTimeout(() => !open && setTyping(false), 1000);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      if (!editable(e.relatedTarget)) setTyping(false);
+    };
+    const onResize = () => {
+      if (window.innerWidth !== width) {
+        width = window.innerWidth;
+        base = 0;
+      }
+      const h = height();
+      if (h > base) base = h;
+      const wasOpen = open;
+      open = isOpen(h);
+      if (wasOpen && !open) setTyping(false);
+    };
+
+    const vv = window.visualViewport;
+    document.addEventListener("focusin", onStart);
+    document.addEventListener("click", onStart, true);
+    document.addEventListener("focusout", onFocusOut);
+    (vv ?? window).addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("focusin", onStart);
+      document.removeEventListener("click", onStart, true);
+      document.removeEventListener("focusout", onFocusOut);
+      (vv ?? window).removeEventListener("resize", onResize);
+    };
+  }, []);
+  return typing;
+}

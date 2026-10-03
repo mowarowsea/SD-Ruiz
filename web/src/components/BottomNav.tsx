@@ -2,6 +2,7 @@ import { faBroom, faHeartPulse, faImages, faLanguage, faPuzzlePiece, faShuffle, 
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { type MouseEvent, useState } from "react";
+import { useTyping } from "../hooks";
 import { MenuItem, PopMenu } from "./PopMenu";
 
 /** 画面。cleanup などのおまけ機能は Extras メニューから開く */
@@ -19,6 +20,7 @@ const extras: { id: Tab | null; icon: IconDefinition; label: string }[] = [
 export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
   const [menu, setMenu] = useState<DOMRect | null>(null);
   const inExtras = tab !== "generate" && tab !== "gallery";
+  const typing = useTyping();
 
   return (
     <>
@@ -41,7 +43,7 @@ export function BottomNav({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => v
           ))}
         </PopMenu>
       )}
-      <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]">
+      <nav hidden={typing} className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-bg pb-[env(safe-area-inset-bottom)]">
         <div className="mx-auto flex h-12 max-w-xl">
           <NavButton icon={faWandMagicSparkles} label="生成" active={tab === "generate"} onClick={() => onChange("generate")} />
           <NavButton icon={faImages} label="ギャラリー" active={tab === "gallery"} onClick={() => onChange("gallery")} />
