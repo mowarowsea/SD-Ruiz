@@ -1,4 +1,4 @@
-import { faCircleInfo, faClone, faFileArrowDown, faTags, faTrashCan } from "@fortawesome/free-solid-svg-icons";
+import { faCheck, faCircleInfo, faClone, faCopy, faFileArrowDown, faTags, faTrashCan } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import type { IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { type MouseEvent, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
@@ -143,8 +143,9 @@ export function GalleryViewer({
   };
 
   const parsed = info ? parseInfotext(info.geninfo) : null;
-  const prompt = parsed && (parsed.params["Template"] ?? parsed.prompt);
-  const negative = parsed && (parsed.params["Negative Template"] ?? parsed.negative);
+  // grid は Dynamic Prompts の構文のまま、単体画像はその画像を作ったときの展開後のプロンプトを出す
+  const prompt = parsed && (file.grid ? (parsed.params["Template"] ?? parsed.prompt) : parsed.prompt);
+  const negative = parsed && (file.grid ? (parsed.params["Negative Template"] ?? parsed.negative) : parsed.negative);
   const seed = parsed?.params["Seed"];
 
   return (
@@ -195,11 +196,11 @@ export function GalleryViewer({
                     </Section>
                   )}
                   <Section title="Prompt">
-                    <PromptEditor key={`${file.path}-p`} value={prompt ?? ""} readOnly />
+                    <PromptBlock key={`${file.path}-p`} value={prompt ?? ""} />
                   </Section>
                   {negative && (
                     <Section title="Negative">
-                      <PromptEditor key={`${file.path}-n`} value={negative} readOnly />
+                      <PromptBlock key={`${file.path}-n`} value={negative} />
                     </Section>
                   )}
                   <Section title="Params">
@@ -266,6 +267,51 @@ function Section({ title, aside, children }: { title: string; aside?: ReactNode;
       {children}
     </div>
   );
+}
+
+/** 表示専用のプロンプト。右上にコピーボタン */
+function PromptBlock({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    if (await copyText(value)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
+  };
+  return (
+    <div className="relative rounded-lg border border-line bg-surface/60 py-2 pr-10 pl-2.5">
+      <PromptEditor value={value} readOnly />
+      <button
+        onClick={copy}
+        aria-label="コピー"
+        className={`absolute top-1 right-1 flex size-8 items-center justify-center rounded-md ${copied ? "text-ok" : "text-muted active:bg-surface2"}`}
+      >
+        <FontAwesomeIcon icon={copied ? faCheck : faCopy} className="text-sm" />
+      </button>
+    </div>
+  );
+}
+
+/** Clipboard API は https (か localhost) でしか使えないので、LAN の http では textarea を選択してコピーする */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 下のやり方で */
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.setAttribute("readonly", "");
+  ta.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(ta);
+  ta.select();
+  ta.setSelectionRange(0, text.length);
+  const ok = document.execCommand("copy");
+  ta.remove();
+  return ok;
 }
 
 function BarButton({ icon, label, onClick, active = false, disabled = false }: { icon: IconDefinition; label: string; onClick: (e: MouseEvent<HTMLButtonElement>) => void; active?: boolean; disabled?: boolean }) {
