@@ -46,7 +46,6 @@ export function NumberField({
       onChange={(e) => setText(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && (e.target as HTMLInputElement).blur()}
-      onFocus={(e) => e.target.select()}
     />
   );
 }
