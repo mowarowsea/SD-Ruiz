@@ -1,4 +1,6 @@
-import { type Dispatch, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { faChevronRight } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
+import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useState } from "react";
 import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { LoraChips } from "../components/LoraChips";
@@ -7,8 +9,11 @@ import { BaseBadge, Thumb } from "../components/Thumb";
 import { addLora, findLoras, removeLora } from "../prompt/lora";
 import { PromptEditor } from "../components/PromptEditor";
 import { ParamsAccordion } from "../components/ParamsAccordion";
+import { RecommendSheet } from "../components/RecommendSheet";
+import { RecommendTip, TipValue } from "../components/RecommendTip";
 import { ResultView } from "../components/ResultView";
-import { type useJob, type usePrefs } from "../hooks";
+import { type useJob, type usePrefs, useRecommend } from "../hooks";
+import { setPromptPresets } from "../prompt/complete";
 
 export function GeneratePage({
   meta,
@@ -30,7 +35,7 @@ export function GeneratePage({
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
   const { job, last, progress, refresh } = jobState;
   const { prefs, reload: reloadPrefs, setFavorite } = prefsState;
-  const [sheet, setSheet] = useState<"checkpoint" | "lora" | null>(null);
+  const [sheet, setSheet] = useState<"checkpoint" | "lora" | "recommend" | null>(null);
   const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
   const model = meta?.models.find((m) => m.title === form.checkpoint);
 
@@ -43,6 +48,17 @@ export function GeneratePage({
     patch({ checkpoint, ...saved });
     const summary = saved && `${saved.width}×${saved.height} · ${saved.steps}st · CFG ${saved.cfg} · ${saved.sampler}`;
     setRestored(mine ? `前回の設定に戻しました: ${summary}` : saved ? `${family} の既定にしました: ${summary}` : null);
+  };
+
+  // このモデルの推奨設定と作例 (見るだけ。値は勝手に変えない)。/quality /negative の補完にも渡す
+  const recommend = useRecommend(form.checkpoint);
+  const rec = recommend.view?.entry?.rec ?? null;
+  const sampleCount = recommend.view?.entry?.samples.length ?? 0;
+  useEffect(() => setPromptPresets({ quality: rec?.quality ?? null, negative: rec?.negative ?? null }), [rec]);
+  const applySample = (p: Partial<GenerateParams>, skipped: string[]) => {
+    if ((form.prompt.trim() || form.negative.trim()) && !confirm("いまの Prompt / Negative を作例のもので上書きします")) return;
+    patch(p);
+    setRestored(skipped.length ? `作例を入れました (そのまま使えないので変えなかった: ${skipped.join("、")})` : "作例を入れました");
   };
 
   // 使っている LoRA がこのモデルに合うか (ベースモデルの構造が違うと効かない)。どちらかが分からなければ合うことにする
@@ -119,17 +135,25 @@ export function GeneratePage({
         <span className="text-lg text-muted">›</span>
       </button>
 
-      {restored && <p className="mt-2 px-1 text-[11px] text-accent">{restored}</p>}
+      <div className="mt-2 flex items-start gap-3 px-1">
+        <p className="min-w-0 flex-1 text-[11px] text-accent">{restored}</p>
+        {form.checkpoint && (
+          <button onClick={() => setSheet("recommend")} className="flex-none text-[11px] text-muted">
+            {recommend.view?.status === "pending" ? "推奨を取得中…" : rec || sampleCount ? `推奨と作例${sampleCount ? ` (${sampleCount})` : ""}` : "推奨と作例"}{" "}
+            <FontAwesomeIcon icon={faChevronRight} className="text-[9px]" />
+          </button>
+        )}
+      </div>
 
-      <Label>Prompt</Label>
+      <Label tip={rec?.quality ? <PromptTip text={rec.quality} command="/quality" /> : null}>Prompt</Label>
       <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" />
       <LoraChips prompt={form.prompt} onChange={(prompt) => patch({ prompt })} onAdd={() => setSheet("lora")} problem={loraProblem} />
 
-      <Label>Negative</Label>
+      <Label tip={rec?.negative ? <PromptTip text={rec.negative} command="/negative" /> : null}>Negative</Label>
       <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" />
 
       <div className="mt-4">
-        <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} />
+        <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} rec={rec} />
       </div>
 
       {/* 生成ボタン (生成画像の上。下に固定するとスマホでプロンプトを打つときにキーボードと重なって邪魔なので) */}
@@ -169,6 +193,7 @@ export function GeneratePage({
           }}
         />
       )}
+      <RecommendSheet open={sheet === "recommend"} onClose={() => setSheet(null)} view={recommend.view} meta={meta} onRefresh={recommend.refresh} onUse={applySample} />
       <LoraSheet
         open={sheet === "lora"}
         onClose={() => setSheet(null)}
@@ -191,6 +216,21 @@ function runningLabel(progress: Progress | null, stepped: boolean) {
   return progress.steps > 0 ? `生成中 ${progress.step} / ${progress.steps}` : "生成中…";
 }
 
-function Label({ children }: { children: string }) {
-  return <div className="mt-4 mb-1.5 px-0.5 text-[11px] tracking-wider text-muted uppercase">{children}</div>;
+function Label({ tip, children }: { tip?: ReactNode; children: string }) {
+  return (
+    <div className="mt-4 mb-1.5 px-0.5 text-[11px] tracking-wider text-muted uppercase">
+      {children}
+      {tip}
+    </div>
+  );
+}
+
+/** Prompt / Negative の (i)。推奨のタグと、補完で呼び出すコマンド */
+function PromptTip({ text, command }: { text: string; command: string }) {
+  return (
+    <RecommendTip>
+      <TipValue>{text}</TipValue>
+      <div className="mt-1.5 text-[11px] text-muted">プロンプト欄で {command} と打つと補完に出ます</div>
+    </RecommendTip>
+  );
 }

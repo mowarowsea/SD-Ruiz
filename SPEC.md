@@ -115,6 +115,27 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - 選んだ TE / VAE が Forge に無い (Forge は起動したときにしか一覧を読まないので、ファイルを足したら Forge の再起動が要る)
   - Anima なのに TE / VAE が指定されていない (Checkpoint に DiT しか入っていない)
 
+### 3.3.2 モデルの推奨設定と作例
+Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) を LLM で JSON にまとめ、生成画面で参照できるようにする。**設定は勝手に書き換えない** (見るだけ。使うかは自分で決める)。
+
+- 取得: `/api/meta` で Checkpoint の一覧を読んだときに、まだ取っていないモデルを見つけたら、裏で 1 つずつ取りにいく (`server/recommend.ts`)
+  - Civitai の ID は `cm-info.json` の `VersionId` / `ModelId` (Civitai Helper の `civitai.info` なら `id` / `modelId`) から
+  - 付随ファイルの無いモデルは、ファイルの SHA256 を計算して `/api/v1/model-versions/by-hash/{sha256}` で引く (数 GB を読むので Civitai の取得より後に回す)。結果は `data/model-hashes.json` に覚え、ファイルの大きさか更新日時が変わったら引き直す。Civitai に無かったものは 1 週間後に引き直す
+  - Civitai から消えたモデル (404) は「消えています」と出し、取り直さない
+  - Civitai API の `/api/v1/model-versions/{id}` (バージョンの説明と作者の作例 最大 10 枚) と `/api/v1/models/{id}` (モデルの説明) を読む。`/api/v1/images` は 503 やメタ無しが多いので使わない
+  - 説明文 (HTML をテキストにして 12,000 字まで) と作例の設定の集計を Groq (`openai/gpt-oss-120b`、JSON モード) に渡して、推奨設定の JSON にしてもらう。Sampler / Scheduler は Forge の名前の一覧から選ばせる (無ければ原文のまま)
+  - 結果は `data/recommended.json` に VersionId をキーにして保存し、LLM は最初の 1 回だけ呼ぶ。失敗したら 1 時間後に取り直す。「取り直す」で手で取り直せる
+  - Groq の API キーは環境変数 `GROQ_API_KEY` か `config.json` の `groqApiKey`。無ければ LLM は呼ばず、作例だけ取る
+  - 429 (無料枠の上限) は `retry-after` だけ待ってから続ける
+- 推奨の中身: Steps / CFG (下限・上限・おすすめ)、Sampler / Scheduler (複数可)、サイズ、Clip skip、Hires fix、クオリティタグ、ネガティブ、そのほかの注意 (日本語で短く)
+- 生成画面
+  - Prompt / Negative と Params の各項目 (サイズ・Steps・CFG・Sampler・Scheduler) のラベルに (i) を出し、押すとそのモデルの推奨値を出す。推奨が無い項目には (i) を出さない。範囲を外れても警告はしない
+  - プロンプト欄で `/quality` と打つとクオリティタグを、`/negative` と打つと推奨ネガティブを補完の候補に出す (まとめて 1 つと、1 タグずつ)
+  - Checkpoint の下の「推奨と作例」でシートを開く: 推奨の一覧・そのほかの注意・Civitai へのリンク・作例
+- 作例: 作者の作例のうち生成情報のあるものを 2 列で並べる (画像は Civitai から直接読む)。R18 (nsfwLevel 4 以上) はぼかし、「R18 を表示」で外す (端末ごとに覚える)
+  - タップで大きく出し、プロンプトと設定を見られる。「プロンプトを使う」で Prompt / Negative を上書き、「設定も使う」でサイズ・Steps・CFG・Sampler・Scheduler も上書きする (Seed は変えない)。いまのプロンプトが空でなければ確認してから
+  - Sampler は Forge の名前に合わせる (`DPM++ 2M Karras` のような古い書き方は Sampler と Scheduler に分ける)。合わないものは変えずに一言出す
+
 ### 3.4 LoRA
 - 一覧には今のモデルに合うもの (中身の構造が同じもの。どちらかが分からなければ合うことにする) だけを出し、合わずに出していない件数を一言出す
 - ボトムシートで検索 (名前・トリガーワード) と、すべて / お気に入り / 使用中 / フォルダ での絞り込み。プレビュー・ベースモデル・トリガーワードを表示
@@ -230,6 +251,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - `forgeDir`: Forge Neo のインストール先。タグ CSV とワイルドカードをここから読む
   - `launcherUrl` / `launcherServiceId`: Forge の起動と診断に使う LocalLauncher (既定 `http://127.0.0.1:8765` / `sd-forge-neo`)
   - 環境変数 `SD_RUIZ_PORT` でポートだけ差し替えられる (本番を動かしたまま別ポートで試すとき用)
+  - `groqApiKey` / `groqModel`: 推奨設定の抽出に使う Groq (キーは環境変数 `GROQ_API_KEY` でもよい。モデルの既定は `openai/gpt-oss-120b`)
 - 配信は `@fastify/compress` で圧縮する (Tailscale 越しのスマホ向け)
 
 ## 5. 未決事項

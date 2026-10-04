@@ -16,12 +16,14 @@ import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
 import { type ModelParams, PrefsStore } from "./prefs.js";
+import { RecommendStore } from "./recommend.js";
 import { Wildcards } from "./wildcards.js";
 
 const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
 const prefs = new PrefsStore();
+const recommend = new RecommendStore({ apiKey: cfg.groqApiKey, model: cfg.groqModel });
 const gallery = new Gallery(cfg.forgeUrl, {
   gridFolders: cfg.gridFolders,
   imageFolders: cfg.imageFolders,
@@ -118,6 +120,11 @@ async function fetchLoras() {
 server.get("/api/meta", async () => {
   sidecars.clear();
   const [models, current, samplers, schedulers] = await Promise.all([fetchModels(), forge.currentCheckpoint(), forge.samplers(), forge.schedulers()]);
+  // まだ推奨設定を取っていないモデルがあれば、裏で取りにいく
+  recommend.ensure(
+    models.map((m) => ({ file: m.filename, civitai: sidecars.get(m.filename).civitai })),
+    { samplers: samplers.map((s) => s.name), schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })) },
+  );
   return {
     current,
     models: models.map((m) => {
@@ -128,6 +135,26 @@ server.get("/api/meta", async () => {
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
   };
+});
+
+// モデルの推奨設定と作例 (status は RecommendStore.view)
+async function modelRef(checkpoint: string) {
+  if (!checkpointPaths.has(checkpoint)) await fetchModels();
+  const file = checkpointPaths.get(checkpoint);
+  return file ? { file, civitai: sidecars.get(file).civitai } : null;
+}
+
+server.get<{ Querystring: { id?: string } }>("/api/recommend", async (req) => {
+  const ref = await modelRef(req.query.id ?? "");
+  return ref ? recommend.view(ref) : { status: "none", url: null, entry: null };
+});
+
+server.post<{ Body: { id?: string } }>("/api/recommend/refresh", async (req) => {
+  const ref = await modelRef(req.body.id ?? "");
+  if (!ref) return { status: "none", url: null, entry: null };
+  const [samplers, schedulers] = await Promise.all([forge.samplers(), forge.schedulers()]);
+  recommend.refresh(ref, { samplers: samplers.map((s) => s.name), schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })) });
+  return recommend.view(ref);
 });
 
 // プロンプト補完: タグは件数が多いのでサーバー側で検索する

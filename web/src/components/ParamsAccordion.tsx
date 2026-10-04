@@ -1,14 +1,77 @@
 import { faDice, faLock } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useState } from "react";
-import type { GenerateParams, Meta } from "../api";
+import { formatRange, type GenerateParams, type Meta, type Recommendation } from "../api";
+import { schedulerLabel as labelOf } from "../recommend";
 import { NumberField } from "./NumberField";
+import { RecommendTip, TipValue } from "./RecommendTip";
 
 type Params = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler" | "seed" | "batch">;
 
 /** ほとんど触らないパラメータ。畳んだ状態では 1 行の要約だけ見せる */
-export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Params; onChange: (patch: Partial<Params>) => void; meta: Meta | null; lastSeed: number | null }) {
+export function ParamsAccordion({
+  value,
+  onChange,
+  meta,
+  lastSeed,
+  rec,
+}: {
+  value: Params;
+  onChange: (patch: Partial<Params>) => void;
+  meta: Meta | null;
+  lastSeed: number | null;
+  /** いまのモデルの推奨 (ラベルの (i) で出す。値は勝手に変えない) */
+  rec: Recommendation | null;
+}) {
   const [open, setOpen] = useState(false);
+  // 推奨の値。Forge にある名前ならタップでその値にできる
+  const sizeTip = rec?.sizes.length ? (
+    <RecommendTip>
+      {rec.sizes.map((s) => {
+        const [width, height] = s.split("x").map(Number);
+        return (
+          <TipValue key={s} current={value.width === width && value.height === height} onPick={() => onChange({ width, height })}>
+            {width}×{height}
+          </TipValue>
+        );
+      })}
+    </RecommendTip>
+  ) : null;
+  const rangeTip = (key: "steps" | "cfg") => {
+    const r = rec?.[key];
+    if (!r) return null;
+    const best = r.best;
+    return (
+      <RecommendTip>
+        <div className="font-mono">{formatRange(r)}</div>
+        {best !== null && (
+          <div className="mt-2">
+            <TipValue current={value[key] === best} onPick={() => onChange({ [key]: best })}>
+              {best} にする
+            </TipValue>
+          </div>
+        )}
+      </RecommendTip>
+    );
+  };
+  const samplerTip = rec?.samplers.length ? (
+    <RecommendTip>
+      {rec.samplers.map((s) => (
+        <TipValue key={s} current={value.sampler === s} onPick={meta?.samplers.includes(s) ? () => onChange({ sampler: s }) : undefined}>
+          {s}
+        </TipValue>
+      ))}
+    </RecommendTip>
+  ) : null;
+  const schedulerTip = rec?.schedulers.length ? (
+    <RecommendTip>
+      {rec.schedulers.map((s) => (
+        <TipValue key={s} current={value.scheduler === s} onPick={meta?.schedulers.some((x) => x.name === s) ? () => onChange({ scheduler: s }) : undefined}>
+          {labelOf(meta, s)}
+        </TipValue>
+      ))}
+    </RecommendTip>
+  ) : null;
   const schedulerLabel = meta?.schedulers.find((s) => s.name === value.scheduler)?.label ?? value.scheduler;
 
   return (
@@ -24,7 +87,7 @@ export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Pa
 
       {open && (
         <div className="grid grid-cols-2 gap-3 border-t border-line p-3">
-          <Field label="幅">
+          <Field label="幅" tip={sizeTip}>
             <NumberField value={value.width} onChange={(width) => onChange({ width })} min={64} max={4096} step={8} ariaLabel="幅" />
           </Field>
           <Field
@@ -37,20 +100,20 @@ export function ParamsAccordion({ value, onChange, meta, lastSeed }: { value: Pa
           >
             <NumberField value={value.height} onChange={(height) => onChange({ height })} min={64} max={4096} step={8} ariaLabel="高さ" />
           </Field>
-          <Field label="Steps">
+          <Field label="Steps" tip={rangeTip("steps")}>
             <NumberField value={value.steps} onChange={(steps) => onChange({ steps })} min={1} max={150} ariaLabel="Steps" />
           </Field>
-          <Field label="CFG">
+          <Field label="CFG" tip={rangeTip("cfg")}>
             <NumberField value={value.cfg} onChange={(cfg) => onChange({ cfg })} min={0} max={30} integer={false} ariaLabel="CFG" />
           </Field>
-          <Field label="Sampler">
+          <Field label="Sampler" tip={samplerTip}>
             <select className="field w-full text-sm" value={value.sampler} onChange={(e) => onChange({ sampler: e.target.value })}>
               {(meta?.samplers ?? [value.sampler]).map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
           </Field>
-          <Field label="Scheduler">
+          <Field label="Scheduler" tip={schedulerTip}>
             <select className="field w-full text-sm" value={value.scheduler} onChange={(e) => onChange({ scheduler: e.target.value })}>
               {(meta?.schedulers ?? [{ name: value.scheduler, label: schedulerLabel }]).map((s) => (
                 <option key={s.name} value={s.name}>
@@ -97,11 +160,14 @@ function SeedMark({ seed }: { seed: number }) {
   );
 }
 
-function Field({ label, action, children }: { label: string; action?: ReactNode; children: ReactNode }) {
+function Field({ label, action, tip, children }: { label: string; action?: ReactNode; tip?: ReactNode; children: ReactNode }) {
   return (
     <label className="block min-w-0">
       <span className="mb-1 flex justify-between text-[11px] text-muted">
-        {label}
+        <span>
+          {label}
+          {tip}
+        </span>
         {action && <span onClick={(e) => e.preventDefault()}>{action}</span>}
       </span>
       {children}

@@ -80,6 +80,51 @@ export interface GenerateParams {
   batch: number;
 }
 
+export interface Range {
+  min: number | null;
+  max: number | null;
+  best: number | null;
+}
+
+/** Civitai の説明文から LLM で読み取ったモデルの推奨設定 */
+export interface Recommendation {
+  steps: Range | null;
+  cfg: Range | null;
+  /** Forge の名前 (合うものが無ければ原文のまま) */
+  samplers: string[];
+  schedulers: string[];
+  /** "832x1216" */
+  sizes: string[];
+  clipSkip: number | null;
+  hires: string | null;
+  quality: string | null;
+  negative: string | null;
+  notes: string[];
+}
+
+/** 作者の作例 (生成情報のあるもの) */
+export interface Sample {
+  url: string;
+  width: number;
+  height: number;
+  nsfwLevel: number;
+  prompt: string;
+  negative: string;
+  steps: number | null;
+  cfg: number | null;
+  sampler: string | null;
+  scheduler: string | null;
+  seed: number | null;
+  clipSkip: number | null;
+}
+
+export interface RecommendView {
+  /** pending: 取得待ち / none: Civitai に無い / gone: Civitai から消えている / no-llm: Groq のキーが無いので作例だけ */
+  status: "ok" | "no-llm" | "gone" | "error" | "pending" | "none";
+  url: string | null;
+  entry: { name: string; fetchedAt: number; error: string | null; rec: Recommendation | null; samples: Sample[] } | null;
+}
+
 export interface TagHit {
   name: string;
   category: number;
@@ -234,6 +279,8 @@ export const api = {
   setModelSettings: (id: string, patch: { params?: null; modules?: string[] | null }) =>
     request<Prefs>("/api/prefs/model", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...patch }) }),
   modules: () => request<{ modules: ForgeModule[] }>("/api/modules"),
+  recommend: (id: string) => request<RecommendView>(`/api/recommend?id=${encodeURIComponent(id)}`),
+  refreshRecommend: (id: string) => post<RecommendView>("/api/recommend/refresh", { id }),
   /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
   deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
@@ -313,4 +360,17 @@ export function formatBytes(n: number) {
   if (n >= 1024 ** 3) return `${(n / 1024 ** 3).toFixed(1)} GB`;
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`;
   return `${Math.round(n / 1024)} KB`;
+}
+
+/** 推奨の範囲を "25–30 (おすすめ 28)" の形にする。片方だけなら "15 以上" / "30 以下" */
+export function formatRange(r: Range | null) {
+  if (!r) return null;
+  const span =
+    r.min !== null && r.max !== null ? (r.min === r.max ? String(r.min) : `${r.min}–${r.max}`) : r.min !== null ? `${r.min} 以上` : r.max !== null ? `${r.max} 以下` : String(r.best);
+  return r.best !== null && span !== String(r.best) ? `${span} (おすすめ ${r.best})` : span;
+}
+
+/** Civitai の画像を幅を指定して読む (original=true のままだと数 MB ある) */
+export function civitaiImage(url: string, width: number) {
+  return url.replace(/\/(original=true|width=\d+)\//, `/width=${width}/`);
 }

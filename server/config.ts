@@ -23,6 +23,9 @@ export interface Config {
   launcherUrl: string | null;
   /** LocalLauncher の config.yaml での Forge Neo のサービス ID */
   launcherServiceId: string;
+  /** モデルの推奨設定を説明文から抜き出すのに使う Groq の API キー (無ければ環境変数 GROQ_API_KEY。どちらも無ければ作例だけ取る) */
+  groqApiKey: string | null;
+  groqModel: string;
 }
 
 const defaults: Config = {
@@ -38,6 +41,8 @@ const defaults: Config = {
   savedDir: null,
   launcherUrl: "http://127.0.0.1:8765",
   launcherServiceId: "sd-forge-neo",
+  groqApiKey: null,
+  groqModel: "openai/gpt-oss-120b",
 };
 
 // config.json (git 管理外) があれば defaults を上書きする
@@ -46,6 +51,7 @@ export function loadConfig(): Config {
   const path = fileURLToPath(new URL("../config.json", import.meta.url));
   const user = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
   const cfg = { ...defaults, ...user, forgeUrl: (user.forgeUrl ?? defaults.forgeUrl).replace(/\/+$/, "") };
+  cfg.groqApiKey ??= process.env.GROQ_API_KEY || null;
   if (process.env.SD_RUIZ_PORT) cfg.port = Number(process.env.SD_RUIZ_PORT);
   return cfg;
 }

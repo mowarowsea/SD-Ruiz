@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type ForgeStatus, type JobState, type Prefs } from "./api";
+import { api, type ForgeStatus, type JobState, type Prefs, type RecommendView } from "./api";
 
 /** localStorage に保存される state。読み書きに失敗しても (プライベートモード等) 普通の state として動く */
 export function usePersistentState<T extends object>(key: string, initial: T) {
@@ -154,4 +154,33 @@ export function useTyping() {
     };
   }, []);
   return typing;
+}
+
+/** モデルの推奨設定と作例。取得待ちのあいだは少しずつ問い合わせ直す */
+export function useRecommend(checkpoint: string) {
+  const [view, setView] = useState<RecommendView | null>(null);
+  const [version, bump] = useState(0);
+  useEffect(() => {
+    setView(null);
+    if (!checkpoint) return;
+    let alive = true;
+    let timer = 0;
+    const load = async (tries: number) => {
+      const v = await api.recommend(checkpoint).catch(() => null);
+      if (!alive) return;
+      setView(v);
+      // ほかのモデルの順番待ちもあるので、長めに待つ
+      if (v?.status === "pending" && tries < 60) timer = window.setTimeout(() => load(tries + 1), 5000);
+    };
+    void load(0);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [checkpoint, version]);
+  const refresh = useCallback(async () => {
+    setView(await api.refreshRecommend(checkpoint));
+    bump((n) => n + 1);
+  }, [checkpoint]);
+  return { view, refresh };
 }

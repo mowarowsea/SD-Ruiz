@@ -154,6 +154,58 @@ async function loraSource(ctx: CompletionContext): Promise<CompletionResult | nu
   };
 }
 
+// ---- /quality /negative (いまのモデルの推奨) ----
+
+/** いまのモデルの推奨のクオリティタグとネガティブ (生成画面がモデルを切り替えたときに入れる) */
+let presets: { quality: string | null; negative: string | null } = { quality: null, negative: null };
+export function setPromptPresets(p: typeof presets) {
+  presets = p;
+}
+
+const commands = [
+  { name: "/quality", label: "クオリティタグ", value: () => presets.quality },
+  { name: "/negative", label: "推奨ネガティブ", value: () => presets.negative },
+];
+
+/** タグを分ける (重みの括弧の中のカンマでは切らない) */
+function splitTags(text: string) {
+  const out: string[] = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+    } else cur += ch;
+  }
+  out.push(cur.trim());
+  return out.filter(Boolean);
+}
+
+function slashSource(ctx: CompletionContext): CompletionResult | null {
+  // 行頭か区切りの後の /xxx。コメントの // と /* は除く
+  const m = ctx.matchBefore(/(?:^|(?<=[\s,]))\/[a-z]*$/);
+  if (!m) return null;
+  const q = m.text.slice(1);
+  const used = usedInDoc(ctx, m.from);
+  const options: Option[] = [];
+  for (const c of commands) {
+    if (!c.name.slice(1).startsWith(q)) continue;
+    const value = c.value();
+    if (!value) {
+      options.push({ label: c.name, detail: `${c.label}なし`, type: "command", apply: () => {} });
+      continue;
+    }
+    const section = { name: `${c.label} (このモデルの推奨)`, rank: commands.indexOf(c) };
+    options.push({ label: value, type: "command", section, boost: 1, apply: (view, _c, from, to) => insertCompletion(view, from, to, value + separatorAfter(view, to)) });
+    for (const t of splitTags(value))
+      options.push({ label: t, type: "command", section, used: used.tag(t.replace(/^[([{]+|[)\]}]+$|:\s*[\d.]+\)?$/g, "")), apply: (view, _c, from, to) => insertCompletion(view, from, to, t + separatorAfter(view, to)) });
+  }
+  return options.length ? { from: m.from, filter: false, options } : null;
+}
+
 async function tagSource(ctx: CompletionContext): Promise<CompletionResult | null> {
   // 直前の区切り (カンマや括弧など) から後ろを 1 つのタグとして扱う
   const m = ctx.matchBefore(/[^\s,()[\]{}|<>:\\][^,()[\]{}|<>:\n]*$/);
@@ -265,7 +317,7 @@ async function selectionSource(ctx: CompletionContext): Promise<CompletionResult
 /** カーソル直前の書きかけに応じて補完の種類を切り替える。範囲を選んでいるときは、その中のタグの訳を出す */
 export async function promptCompletion(ctx: CompletionContext): Promise<CompletionResult | null> {
   if (!ctx.state.selection.main.empty) return ctx.explicit ? selectionSource(ctx) : null;
-  return (await wildcardSource(ctx)) ?? (await loraSource(ctx)) ?? (await tagSource(ctx));
+  return slashSource(ctx) ?? (await wildcardSource(ctx)) ?? (await loraSource(ctx)) ?? (await tagSource(ctx));
 }
 
 /** 範囲を選び終えたら (少し待って選択が動かなければ) 訳の一覧を出す */

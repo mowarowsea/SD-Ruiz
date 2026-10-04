@@ -198,6 +198,16 @@ input[type="number"]::-webkit-outer-spin-button {
 .cm-opt-tag-5 .cm-completionLabel { color: #e8c27a; }
 .cm-opt-wildcard .cm-completionLabel { color: #8fcfc0; }
 .cm-opt-lora .cm-completionLabel { color: #b9c9e6; }
+/* /quality /negative の候補。まとめた 1 つは長いので折り返して 2 行まで */
+.cm-opt-command .cm-completionLabel {
+  flex-shrink: 1;
+  max-width: 100%;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  color: var(--color-accent);
+}
 
 /* キーボード操作時のフォーカス枠をテーマ色に */
 :focus-visible {
