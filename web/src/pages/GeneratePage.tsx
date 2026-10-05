@@ -101,6 +101,16 @@ export function GeneratePage({
   const running = job?.status === "running" || submitting;
   const canGenerate = !!forge?.online && !!form.checkpoint && !running;
 
+  // 中断は押してから実際に止まるまで間があるので、押したら「中断中…」にして押せたことが分かるようにする。生成が終わったら戻す
+  const [interrupting, setInterrupting] = useState(false);
+  useEffect(() => {
+    if (!running) setInterrupting(false);
+  }, [running]);
+  const interrupt = () => {
+    setInterrupting(true);
+    api.interrupt().catch(() => setInterrupting(false));
+  };
+
   const generate = async () => {
     setSubmitError(null);
     setSubmitting(true);
@@ -186,14 +196,14 @@ export function GeneratePage({
             <div className="flex gap-2">
               <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
                 <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round(ratio * 100)}%` }} />
-                <span className="relative">{job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
+                <span className="relative">{interrupting ? "中断しています…" : job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
               </div>
-              <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
-                中断
+              <button onClick={interrupt} disabled={interrupting} className={`rounded-2xl border border-line bg-surface px-4 text-sm text-muted ${PRESS} disabled:opacity-50`}>
+                {interrupting ? "中断中…" : "中断"}
               </button>
             </div>
           ) : (
-            <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
+            <button onClick={generate} disabled={!canGenerate} className={`w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink ${PRESS} disabled:opacity-40`}>
               生成
             </button>
           )}
@@ -232,6 +242,9 @@ export function GeneratePage({
     </div>
   );
 }
+
+/** 押したときに少し沈む (生成・中断は押せたか分かりにくいので)。押せないときは沈まない */
+const PRESS = "transition-transform duration-100 active:scale-[0.97] active:brightness-90 disabled:active:scale-100 disabled:active:brightness-100";
 
 /** 生成中のボタンの表示 (始まる前のモデルの読み込み中と、終わり際の VAE デコード・保存中はステップが 0) */
 function runningLabel(progress: Progress | null, stepped: boolean) {
