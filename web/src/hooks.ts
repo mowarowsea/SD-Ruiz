@@ -125,8 +125,14 @@ export function useTyping() {
       clearTimeout(timer);
       timer = window.setTimeout(() => !open && setTyping(false), 1000);
     };
+    // キーボードが出ている間にフォーカスが外れたら、閉じきる (画面の高さが戻る) まで待つ。
+    // すぐ戻すと、閉じかけのキーボードの上に下部ナビや生成ボタンが一瞬出てちらつくので。
+    // 高さの変化が来ないまま (キーボードが閉じなかったなど) のときのために、少し待ったら戻す
     const onFocusOut = (e: FocusEvent) => {
-      if (!editable(e.relatedTarget)) setTyping(false);
+      if (editable(e.relatedTarget)) return;
+      clearTimeout(timer);
+      if (!open) setTyping(false);
+      else timer = window.setTimeout(() => setTyping(false), 1000);
     };
     const onResize = () => {
       if (window.innerWidth !== width) {
@@ -137,7 +143,10 @@ export function useTyping() {
       if (h > base) base = h;
       const wasOpen = open;
       open = isOpen(h);
-      if (wasOpen && !open) setTyping(false);
+      if (wasOpen && !open) {
+        clearTimeout(timer);
+        setTyping(false);
+      }
     };
 
     const vv = window.visualViewport;
