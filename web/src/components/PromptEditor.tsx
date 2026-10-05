@@ -1,7 +1,7 @@
 import { autocompletion } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
-import { EditorState } from "@codemirror/state";
-import { EditorView, keymap, lineNumbers as lineNumbersExt, placeholder as placeholderExt, tooltips } from "@codemirror/view";
+import { Compartment, EditorState } from "@codemirror/state";
+import { Decoration, EditorView, keymap, lineNumbers as lineNumbersExt, MatchDecorator, placeholder as placeholderExt, tooltips, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { faCheck, faCopy } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -37,6 +37,7 @@ export function PromptEditor({
   readOnly = false,
   lineNumbers = false,
   copyable = false,
+  highlight = "",
 }: {
   value: string;
   onChange?: (v: string) => void;
@@ -48,9 +49,12 @@ export function PromptEditor({
   lineNumbers?: boolean;
   /** 枠の内側の右上にコピーボタンを出す */
   copyable?: boolean;
+  /** 検索中の文言。当たったところに色を付ける */
+  highlight?: string;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
+  const found = useRef(new Compartment());
   const changeRef = useRef(onChange);
   changeRef.current = onChange;
 
@@ -74,6 +78,7 @@ export function PromptEditor({
           // 補完の候補が入力欄の枠で切れないように body 直下に出す
           tooltips({ parent: document.body }),
           theme,
+          found.current.of(foundHighlight(highlight)),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) changeRef.current?.(u.state.doc.toString());
           }),
@@ -94,6 +99,10 @@ export function PromptEditor({
       foldAll(v);
     }
   }, [value]);
+
+  useEffect(() => {
+    view.current?.dispatch({ effects: found.current.reconfigure(foundHighlight(highlight)) });
+  }, [highlight]);
 
   // 右上のトークン数 (ワイルドカードは 1 行ずつ別の候補なので出さない)
   const showCount = !lineNumbers;
@@ -132,6 +141,26 @@ export function PromptEditor({
         </span>
       )}
     </div>
+  );
+}
+
+const foundMark = Decoration.mark({ class: "pt-found" });
+
+/** 検索に当たったところ (大文字・小文字は区別しない) */
+function foundHighlight(query: string) {
+  if (!query) return [];
+  const decorator = new MatchDecorator({ regexp: new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), decoration: foundMark });
+  return ViewPlugin.fromClass(
+    class {
+      decorations;
+      constructor(view: EditorView) {
+        this.decorations = decorator.createDeco(view);
+      }
+      update(u: ViewUpdate) {
+        this.decorations = decorator.updateDeco(u, this.decorations);
+      }
+    },
+    { decorations: (v) => v.decorations },
   );
 }
 

@@ -1,8 +1,9 @@
-import { faChevronRight } from "@fortawesome/free-solid-svg-icons";
+import { faChevronRight, faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
+import { FindReplace } from "../components/FindReplace";
 import { LoraChips } from "../components/LoraChips";
 import { LoraSheet } from "../components/LoraSheet";
 import { BaseBadge, Thumb } from "../components/Thumb";
@@ -42,6 +43,8 @@ export function GeneratePage({
   const { job, last, progress, refresh } = jobState;
   const { prefs, reload: reloadPrefs, setFavorite } = prefsState;
   const [sheet, setSheet] = useState<"checkpoint" | "lora" | "recommend" | null>(null);
+  // Prompt / Negative の検索・置換。null なら閉じている
+  const [find, setFind] = useState<string | null>(null);
   const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
   const model = meta?.models.find((m) => m.title === form.checkpoint);
 
@@ -177,12 +180,22 @@ export function GeneratePage({
         )}
       </div>
 
-      <Label tip={rec?.quality ? <PromptTip text={rec.quality} command="/quality" /> : null}>Prompt</Label>
-      <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" />
+      <Label
+        tip={rec?.quality ? <PromptTip text={rec.quality} command="/quality" /> : null}
+        aside={
+          <button onClick={() => setFind((f) => (f === null ? "" : null))} aria-label="プロンプトを検索・置換" className={`px-1 text-xs ${find !== null ? "text-accent" : "text-muted"}`}>
+            <FontAwesomeIcon icon={faMagnifyingGlass} />
+          </button>
+        }
+      >
+        Prompt
+      </Label>
+      {find !== null && <FindReplace query={find} onQuery={setFind} texts={{ prompt: form.prompt, negative: form.negative }} onChange={patch} onClose={() => setFind(null)} />}
+      <PromptEditor value={form.prompt} onChange={(prompt) => patch({ prompt })} placeholder="masterpiece, best quality, 1girl, ..." minHeight="9rem" highlight={find ?? ""} />
       <LoraChips prompt={form.prompt} onChange={(prompt) => patch({ prompt })} onAdd={() => setSheet("lora")} problem={loraProblem} />
 
       <Label tip={rec?.negative ? <PromptTip text={rec.negative} command="/negative" /> : null}>Negative</Label>
-      <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" />
+      <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" highlight={find ?? ""} />
 
       <div className="mt-4">
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} rec={rec} />
@@ -253,11 +266,14 @@ function runningLabel(progress: Progress | null, stepped: boolean) {
   return progress.steps > 0 ? `生成中 ${progress.step} / ${progress.steps}` : "生成中…";
 }
 
-function Label({ tip, children }: { tip?: ReactNode; children: string }) {
+function Label({ tip, aside, children }: { tip?: ReactNode; aside?: ReactNode; children: string }) {
   return (
-    <div className="mt-4 mb-1.5 px-0.5 text-[11px] tracking-wider text-muted uppercase">
-      {children}
-      {tip}
+    <div className="mt-4 mb-1.5 flex items-center px-0.5 text-[11px] tracking-wider text-muted uppercase">
+      <span>
+        {children}
+        {tip}
+      </span>
+      {aside && <span className="ml-auto normal-case">{aside}</span>}
     </div>
   );
 }
