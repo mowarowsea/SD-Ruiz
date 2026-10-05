@@ -2,7 +2,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { api, type ForgeStatus, type GenerateParams, type Meta } from "./api";
 import { defaultForm, toForm } from "./form";
 import { BottomNav, type Tab, tabs } from "./components/BottomNav";
-import { useForgeStatus, useJob, usePersistentState, usePrefs } from "./hooks";
+import { useForgeStatus, useJob, usePersistentState, usePrefs, useTyping } from "./hooks";
 import { GeneratePage } from "./pages/GeneratePage";
 import { GalleryPage } from "./pages/GalleryPage";
 import { ModelSettingsPage } from "./pages/ModelSettingsPage";
@@ -16,6 +16,8 @@ export function App() {
   // 前のバージョンで保存した、今は無い画面
   if (!tabs.includes(nav.tab)) nav.tab = "generate";
   const { status, starting, launcher, serverDown, refresh: refreshStatus } = useForgeStatus();
+  // スマホで文字を打っている間は、下に浮かせているもの (下部ナビと生成ボタン) を隠す
+  const typing = useTyping();
   const [meta, setMeta] = useState<Meta | null>(null);
   const jobState = useJob();
   const prefsState = usePrefs();
@@ -100,6 +102,8 @@ export function App() {
             setForm={setForm}
             jobState={jobState}
             prefsState={prefsState}
+            typing={typing}
+            active={nav.tab === "generate"}
             onCheckpointDeleted={(title) => setMeta((m) => m && { ...m, models: m.models.filter((x) => x.title !== title) })}
           />
         </div>
@@ -119,7 +123,7 @@ export function App() {
         {nav.tab === "forge" && <ForgePage status={status} starting={starting} launcher={launcher} onChanged={refreshStatus} />}
       </main>
 
-      <BottomNav tab={nav.tab} onChange={(tab) => setNav({ tab })} />
+      <BottomNav tab={nav.tab} onChange={(tab) => setNav({ tab })} hidden={typing} />
     </>
   );
 }

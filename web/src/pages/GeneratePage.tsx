@@ -1,6 +1,6 @@
 import { faChevronRight } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useState } from "react";
+import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { LoraChips } from "../components/LoraChips";
@@ -22,6 +22,8 @@ export function GeneratePage({
   setForm,
   jobState,
   prefsState,
+  typing,
+  active,
   onCheckpointDeleted,
 }: {
   meta: Meta | null;
@@ -30,6 +32,10 @@ export function GeneratePage({
   setForm: Dispatch<SetStateAction<GenerateParams>>;
   jobState: ReturnType<typeof useJob>;
   prefsState: ReturnType<typeof usePrefs>;
+  /** スマホで文字を打っている間 (生成ボタンを隠す) */
+  typing: boolean;
+  /** 生成画面を開いているか (隠れているときは Ctrl+Enter で生成しない) */
+  active: boolean;
   onCheckpointDeleted: (title: string) => void;
 }) {
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
@@ -109,6 +115,22 @@ export function GeneratePage({
     }
   };
 
+  // PC 向けに Ctrl+Enter (Mac は ⌘+Enter) でも生成する。プロンプト欄 (CodeMirror の Mod-Enter は空行の挿入) より先に取るので capture で聞く。
+  // シートを開いている間はしない
+  const onShortcut = useRef<() => void>(() => {});
+  onShortcut.current = () => canGenerate && void generate();
+  useEffect(() => {
+    if (!active || sheet) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.isComposing) return;
+      e.preventDefault();
+      e.stopPropagation();
+      onShortcut.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [active, sheet]);
+
   // 進捗は 1 回の生成の中では戻さない (終わり際に Forge が 0 を返すとバーが右から左へ縮んで、エラーで戻ったように見えるので)。
   // 始まった直後は前の生成の値が残っていることがあるので、ステップが進み始めるまでは使わない
   const [seen, setSeen] = useState({ id: "", ratio: 0, stepped: false });
@@ -122,7 +144,7 @@ export function GeneratePage({
   const lastSeed = last?.seeds.length ? last.seeds[0] : null;
 
   return (
-    <div className="pb-20">
+    <div className="pb-36">
       <button onClick={() => setSheet("checkpoint")} className="flex w-full items-center gap-3 rounded-2xl border border-line bg-surface p-2.5 text-left" disabled={!meta}>
         <Thumb kind="checkpoint" id={form.checkpoint} has={!!model?.preview} className="size-14 flex-none rounded-xl" />
         <div className="min-w-0 flex-1">
@@ -156,24 +178,26 @@ export function GeneratePage({
         <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} rec={rec} />
       </div>
 
-      {/* 生成ボタン (生成画像の上。下に固定するとスマホでプロンプトを打つときにキーボードと重なって邪魔なので) */}
-      <div className="mt-4">
-        {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
-        {running ? (
-          <div className="flex gap-2">
-            <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
-              <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round(ratio * 100)}%` }} />
-              <span className="relative">{job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
+      {/* 生成ボタン (下部ナビの上に浮かせる。スマホで文字を打っている間は、キーボードと一緒にせり上がらないよう下部ナビと一緒に隠す) */}
+      <div hidden={typing} className="fixed inset-x-0 bottom-[calc(3rem+env(safe-area-inset-bottom))] z-20 bg-gradient-to-t from-bg from-60% to-transparent px-4 pt-6 pb-3">
+        <div className="mx-auto max-w-xl">
+          {submitError && <p className="mb-2 text-xs break-words text-danger">{submitError}</p>}
+          {running ? (
+            <div className="flex gap-2">
+              <div className="relative flex-1 overflow-hidden rounded-2xl bg-accent/25 py-3.5 text-center text-base font-semibold">
+                <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round(ratio * 100)}%` }} />
+                <span className="relative">{job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
+              </div>
+              <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
+                中断
+              </button>
             </div>
-            <button onClick={() => api.interrupt()} className="rounded-2xl border border-line bg-surface px-4 text-sm text-muted">
-              中断
+          ) : (
+            <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
+              生成
             </button>
-          </div>
-        ) : (
-          <button onClick={generate} disabled={!canGenerate} className="w-full rounded-2xl bg-accent py-3.5 text-base font-semibold tracking-wide text-accent-ink disabled:opacity-40">
-            生成
-          </button>
-        )}
+          )}
+        </div>
       </div>
 
       <ResultView job={job} last={last} progress={progress} />
