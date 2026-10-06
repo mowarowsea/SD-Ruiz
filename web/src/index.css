@@ -89,9 +89,9 @@ input[type="number"]::-webkit-outer-spin-button {
 .pt-depth-2 {
   color: #b7c98f;
 }
+/* 太字にしない。|| のように並んだ片方を消すと、Chrome が残ったほうを描き直さず見えなくなる (DOM は正しい) */
 .pt-separator {
   color: #e8c27a;
-  font-weight: 700;
 }
 .pt-variant {
   color: #9fb4d8;
