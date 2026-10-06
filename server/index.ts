@@ -480,9 +480,11 @@ server.get("/api/job", async () => {
     return { job: jobView(job), progress: null, last };
   }
   const p = await forge.progress(true).catch(() => null);
+  // 進捗を待っている間に生成が終わることがあるので、job と last は待ったあとに読み直す
+  // (先に読んだ last のまま「完了」を返すと、画面がポーリングをやめて前回の画像が残り続ける)
   return {
     job: jobView(job),
-    last,
+    last: jobs.last && jobView(jobs.last),
     progress: p && {
       ratio: p.progress,
       eta: p.eta_relative,
