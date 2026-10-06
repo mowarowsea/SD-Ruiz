@@ -114,6 +114,10 @@ export function useTyping() {
     let timer = 0;
     const isOpen = (h: number) => h < base - 120;
     const editable = (t: EventTarget | null) => t instanceof Element && !!t.closest(EDITABLE);
+    // タイマーでは覚えている open ではなく今の高さで見る。
+    // 画面ロックやアプリ切り替えでキーボードが消えると高さの変化 (resize) が届かず open が true のまま残り、
+    // 戻ってきたときのフォーカス (focusin) で隠したきり、フォーカスを外すまで生成ボタンが出なくなるため
+    const closeIfNoKeyboard = () => !isOpen(height()) && setTyping(false);
 
     // 触れただけ (pointerdown) で隠すと、入力欄の上からスクロールするたびにちらつくので、フォーカスとタップ (click) で見る。
     // click は、戻るボタンでキーボードだけ閉じた後にもう一度タップしたとき用 (フォーカスは残っているので focusin が来ない)。
@@ -123,7 +127,7 @@ export function useTyping() {
       setTyping(true);
       // キーボードが出ないまま (外付けキーボードや、スクリプトでフォーカスが戻っただけなど) なら戻す
       clearTimeout(timer);
-      timer = window.setTimeout(() => !open && setTyping(false), 1000);
+      timer = window.setTimeout(closeIfNoKeyboard, 1000);
     };
     // キーボードが出ている間にフォーカスが外れたら、閉じきる (画面の高さが戻る) まで待つ。
     // すぐ戻すと、閉じかけのキーボードの上に下部ナビや生成ボタンが一瞬出てちらつくので。
@@ -149,16 +153,21 @@ export function useTyping() {
       }
     };
 
+    // 画面に戻ってきたら測り直す (隠れている間の高さの変化は届かないことがある)
+    const onVisible = () => document.visibilityState === "visible" && onResize();
+
     const vv = window.visualViewport;
     document.addEventListener("focusin", onStart);
     document.addEventListener("click", onStart, true);
     document.addEventListener("focusout", onFocusOut);
+    document.addEventListener("visibilitychange", onVisible);
     (vv ?? window).addEventListener("resize", onResize);
     return () => {
       clearTimeout(timer);
       document.removeEventListener("focusin", onStart);
       document.removeEventListener("click", onStart, true);
       document.removeEventListener("focusout", onFocusOut);
+      document.removeEventListener("visibilitychange", onVisible);
       (vv ?? window).removeEventListener("resize", onResize);
     };
   }, []);
