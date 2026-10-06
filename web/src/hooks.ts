@@ -98,10 +98,16 @@ export function usePrefs() {
 const EDITABLE = 'textarea, [contenteditable="true"], .cm-editor, input:not([type="checkbox"], [type="radio"], [type="range"], [type="button"], [type="submit"], [type="file"], [type="color"])';
 
 /**
- * スマホで文字を打っている (キーボードが出ている) 間か。下部ナビを隠すのに使う。
- * 入力欄にフォーカスが入った時点で true にし (キーボードと一緒にナビがせり上がらないよう先に隠す)、
- * キーボードが閉じた (画面の高さが戻った) かフォーカスが外れたら false に戻す。
- * フォーカスだけで判定すると、キーボードを閉じても編集欄にフォーカスが残る・戻ることがあり、ナビが出てこなくなるため
+ * スマホで文字を打っている (キーボードが出ている) 間か。下部ナビと生成ボタンを隠すのに使う。
+ *
+ * イベントの順番や覚えておいた状態から推し量ると、画面ロック・アプリ切り替え・回転などで
+ * イベントが 1 つ抜けただけで食い違ったまま戻らなくなる (隠れっぱなし・出っぱなし)。
+ * そこで毎回「今フォーカスが入力欄にあるか」と「今の画面の高さがキーボードの出ている高さか」から決め直し、
+ * イベントのほかに定期的にも決め直す (届かなかったイベントがあっても、すぐ正しい状態に戻る)。
+ *
+ * 例外として、時間を区切って次の 2 つだけ見た目を先回りする。
+ * - 入力欄に触れた直後: キーボードが上がりきる前に隠す (キーボードと一緒にせり上がらないよう)
+ * - 入力欄からフォーカスが外れた直後: キーボードが閉じきるまで隠したままにする (閉じかけのキーボードの上でちらつかないよう)
  */
 export function useTyping() {
   const [typing, setTyping] = useState(false);
@@ -109,66 +115,62 @@ export function useTyping() {
     if (!matchMedia("(pointer: coarse)").matches) return;
     const height = () => window.visualViewport?.height ?? window.innerHeight;
     let width = window.innerWidth;
-    let base = height(); // キーボードが出ていないときの高さ (画面の向きが変わったら測り直す)
-    let open = false; // キーボードが出ているか
-    let timer = 0;
-    const isOpen = (h: number) => h < base - 120;
+    let base = height(); // キーボードが出ていないときの高さ (見た中でいちばん高いもの。画面の向きが変わったら測り直す)
+    let openUntil = 0; // 入力欄に触れてから、キーボードが上がりきるのを待つ期限
+    let closeUntil = 0; // 入力欄から離れてから、キーボードが閉じきるのを待つ期限
     const editable = (t: EventTarget | null) => t instanceof Element && !!t.closest(EDITABLE);
-    // タイマーでは覚えている open ではなく今の高さで見る。
-    // 画面ロックやアプリ切り替えでキーボードが消えると高さの変化 (resize) が届かず open が true のまま残り、
-    // 戻ってきたときのフォーカス (focusin) で隠したきり、フォーカスを外すまで生成ボタンが出なくなるため
-    const closeIfNoKeyboard = () => !isOpen(height()) && setTyping(false);
-
-    // 触れただけ (pointerdown) で隠すと、入力欄の上からスクロールするたびにちらつくので、フォーカスとタップ (click) で見る。
-    // click は、戻るボタンでキーボードだけ閉じた後にもう一度タップしたとき用 (フォーカスは残っているので focusin が来ない)。
-    // click はスクロールでは起きない
-    const onStart = (e: Event) => {
-      if (!editable(e.target)) return;
-      setTyping(true);
-      // キーボードが出ないまま (外付けキーボードや、スクリプトでフォーカスが戻っただけなど) なら戻す
-      clearTimeout(timer);
-      timer = window.setTimeout(closeIfNoKeyboard, 1000);
+    // キーボードが出ている高さか。測っておいた高さとの比較に加えて、画面そのものの高さとも比べる
+    // (キーボードが出たまま回転したり読み込んだりすると、測っておいた高さが低いままになるため)
+    const keyboardOpen = () => {
+      const h = height();
+      const landscape = screen.orientation?.type.startsWith("landscape") ?? window.innerWidth > base;
+      const screenHeight = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+      return h < base - 120 || h < screenHeight * 0.6;
     };
-    // キーボードが出ている間にフォーカスが外れたら、閉じきる (画面の高さが戻る) まで待つ。
-    // すぐ戻すと、閉じかけのキーボードの上に下部ナビや生成ボタンが一瞬出てちらつくので。
-    // 高さの変化が来ないまま (キーボードが閉じなかったなど) のときのために、少し待ったら戻す
-    const onFocusOut = (e: FocusEvent) => {
-      if (editable(e.relatedTarget)) return;
-      clearTimeout(timer);
-      if (!open) setTyping(false);
-      else timer = window.setTimeout(() => setTyping(false), 1000);
-    };
-    const onResize = () => {
+    const update = () => {
       if (window.innerWidth !== width) {
         width = window.innerWidth;
         base = 0;
       }
       const h = height();
       if (h > base) base = h;
-      const wasOpen = open;
-      open = isOpen(h);
-      if (wasOpen && !open) {
-        clearTimeout(timer);
-        setTyping(false);
-      }
+      const now = Date.now();
+      const open = keyboardOpen();
+      if (editable(document.activeElement)) setTyping(open || now < openUntil);
+      else setTyping(open && now < closeUntil);
     };
 
-    // 画面に戻ってきたら測り直す (隠れている間の高さの変化は届かないことがある)
-    const onVisible = () => document.visibilityState === "visible" && onResize();
+    // 触れただけ (pointerdown) で隠すと、入力欄の上からスクロールするたびにちらつくので、フォーカスとタップ (click) で見る。
+    // click は、戻るボタンでキーボードだけ閉じた後にもう一度タップしたとき用 (フォーカスは残っているので focusin が来ない)。
+    // click はスクロールでは起きない
+    const onStart = (e: Event) => {
+      if (!editable(e.target)) return;
+      openUntil = Date.now() + 1500;
+      setTyping(true);
+    };
+    const onFocusOut = (e: FocusEvent) => {
+      if (!editable(e.target) || editable(e.relatedTarget)) return;
+      closeUntil = Date.now() + 1000;
+      // focusout の最中は activeElement がまだ切り替わっていないことがあるので、一呼吸おいてから見る
+      window.setTimeout(update);
+    };
+    const onVisible = () => document.visibilityState === "visible" && update();
 
     const vv = window.visualViewport;
     document.addEventListener("focusin", onStart);
     document.addEventListener("click", onStart, true);
     document.addEventListener("focusout", onFocusOut);
     document.addEventListener("visibilitychange", onVisible);
-    (vv ?? window).addEventListener("resize", onResize);
+    (vv ?? window).addEventListener("resize", update);
+    // 届かなかったイベントの穴埋め。高さとフォーカスを見るだけで、変わらなければ再描画もしない
+    const timer = window.setInterval(update, 300);
     return () => {
-      clearTimeout(timer);
+      clearInterval(timer);
       document.removeEventListener("focusin", onStart);
       document.removeEventListener("click", onStart, true);
       document.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("visibilitychange", onVisible);
-      (vv ?? window).removeEventListener("resize", onResize);
+      (vv ?? window).removeEventListener("resize", update);
     };
   }, []);
   return typing;
