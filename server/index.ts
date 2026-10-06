@@ -284,7 +284,7 @@ server.get<{ Querystring: { kind: Kind; offset?: number; tag?: string; q?: strin
   },
 );
 
-server.get("/api/gallery/tags", async () => ({ tags: gallery.customTags() }));
+server.get("/api/gallery/tags", async () => ({ tags: await gallery.customTags() }));
 
 server.get<{ Querystring: { path: string; kind: Kind } }>("/api/gallery/info", async (req) => gallery.info(req.query.path));
 
@@ -535,3 +535,6 @@ if (existsSync(dist)) {
 await server.listen({ port: cfg.port, host: cfg.host });
 server.log.info(`Forge: ${cfg.forgeUrl}`);
 server.log.info(cfg.forgeDir ? `タグ ${tags.size} 件・訳 ${tags.translationCount} 件を読み込みました` : "forgeDir が未設定なのでタグ補完は無効です");
+
+// ギャラリーを初めて開いたときに待たせないよう、フォルダの一覧とタグを先に読んでおく (Forge が落ちていれば開いたときに読む)
+void Promise.all([gallery.list({ kind: "grid", offset: 0, limit: 1 }), gallery.list({ kind: "image", offset: 0, limit: 1 })]).catch(() => {});

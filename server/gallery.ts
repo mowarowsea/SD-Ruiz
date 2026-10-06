@@ -16,7 +16,7 @@
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { Worker } from "node:worker_threads";
 import { ForgeError } from "./forge.js";
 
 export type Kind = "grid" | "image";
@@ -112,6 +112,30 @@ function fileJobId(name: string) {
 function fileSeed(name: string) {
   const m = /^\d+-(\d+)/.exec(name);
   return m ? Number(m[1]) : null;
+}
+
+/** iib.db のカスタムタグと、それが付いたパス。全走査で 1 秒ほどかかるので別スレッドで読む */
+function readTags(db: string): Promise<{ all: CustomTag[]; rows: { path: string; id: number }[] }> {
+  const code = `
+    const { parentPort, workerData } = require("node:worker_threads");
+    const { DatabaseSync } = require("node:sqlite");
+    const db = new DatabaseSync(workerData, { readOnly: true });
+    try {
+      const all = db.prepare("SELECT id, name FROM tag WHERE type = 'custom' ORDER BY id").all();
+      const rows = all.length
+        ? db.prepare("SELECT i.path AS path, it.tag_id AS id FROM image_tag it JOIN image i ON i.id = it.image_id WHERE it.tag_id IN (" + all.map((t) => t.id).join(",") + ")").all()
+        : [];
+      parentPort.postMessage({ all: all.map((t) => ({ id: t.id, name: t.name })), rows: rows.map((r) => ({ path: r.path, id: r.id })) });
+    } finally {
+      db.close();
+    }
+  `;
+  return new Promise((resolve, reject) => {
+    const w = new Worker(code, { eval: true, workerData: db, execArgv: ["--no-warnings=ExperimentalWarning"] });
+    w.once("message", resolve);
+    w.once("error", reject);
+    w.once("exit", (c) => c !== 0 && reject(new ForgeError(`タグの読み込みが終了コード ${c} で止まりました`)));
+  });
 }
 
 /**
@@ -280,32 +304,49 @@ export class Gallery {
   }
 
   /**
-   * パス → カスタムタグ。読み直しは 1 秒ほどかかる (image_tag に tag_id の索引が無い) ので、
-   * SD-Ruiz から付け外ししたときは patchTags() で手元の分だけ直す
+   * パス → カスタムタグ。読み直しは 1 秒ほどかかる (image_tag が 2,000 万行あり、tag_id の索引が無いので全走査) ので
+   * - 別スレッドで読む (その間ほかの要求を止めないよう)
+   * - 古くなったら手元の分をそのまま使い、裏で読み直す (ギャラリーを開くたびに 1 秒待たせないよう)
+   * - SD-Ruiz から付け外ししたときは patchTags() で手元の分だけ直す
+   * 使う前に ensureTags() を待つこと
    */
   private tags() {
-    if (this.tagCache && Date.now() - this.tagCache.at < 60_000) return this.tagCache;
-    const db = new DatabaseSync(this.dbPath(), { readOnly: true });
-    try {
-      const all = db.prepare("SELECT id, name FROM tag WHERE type = 'custom' ORDER BY id").all() as unknown as CustomTag[];
-      const byId = new Map(all.map((t) => [t.id, t]));
-      const rows = all.length
-        ? (db.prepare(`SELECT i.path AS path, it.tag_id AS id FROM image_tag it JOIN image i ON i.id = it.image_id WHERE it.tag_id IN (${all.map((t) => t.id).join(",")})`).all() as unknown as { path: string; id: number }[])
-        : [];
-      const map = new Map<string, CustomTag[]>();
-      for (const r of rows) {
-        const k = key(r.path);
-        map.set(k, [...(map.get(k) ?? []), byId.get(r.id)!]);
+    if (!this.tagCache) throw new ForgeError("タグをまだ読み込んでいません");
+    return this.tagCache;
+  }
+
+  private async ensureTags() {
+    if (!this.tagCache) await this.refreshTags();
+    else if (Date.now() - this.tagCache.at > 60_000) this.refreshTags().catch(() => {});
+  }
+
+  private tagLoad: Promise<void> | null = null;
+  /** 読み直しの途中に SD-Ruiz から付け外しした分 (読み終えたあとに当て直す) */
+  private tagPatches: Parameters<Gallery["patchTags"]>[] = [];
+
+  /** IIB の DB を読み直す (読み直し中に呼ばれたら、その読み直しを待つ) */
+  refreshTags(): Promise<void> {
+    return (this.tagLoad ??= (async () => {
+      this.tagPatches = [];
+      try {
+        const { all, rows } = await readTags(this.dbPath());
+        const byId = new Map(all.map((t) => [t.id, t]));
+        const map = new Map<string, CustomTag[]>();
+        for (const r of rows) {
+          const k = key(r.path);
+          map.set(k, [...(map.get(k) ?? []), byId.get(r.id)!]);
+        }
+        this.tagCache = { at: Date.now(), map, all };
+        for (const p of this.tagPatches) this.patchTags(...p);
+      } finally {
+        this.tagLoad = null;
       }
-      this.tagCache = { at: Date.now(), map, all };
-      return this.tagCache;
-    } finally {
-      db.close();
-    }
+    })());
   }
 
   /** IIB に書き込んだ付け外しを手元の一覧にも反映する */
   private patchTags(paths: string[], tagId: number, on: boolean) {
+    if (this.tagLoad) this.tagPatches.push([paths, tagId, on]);
     const c = this.tagCache;
     const tag = c?.all.find((t) => t.id === tagId);
     if (!c || !tag) return;
@@ -315,11 +356,8 @@ export class Gallery {
     }
   }
 
-  invalidateTags() {
-    this.tagCache = null;
-  }
-
-  customTags() {
+  async customTags() {
+    await this.ensureTags();
     return this.tags().all;
   }
 
@@ -384,7 +422,8 @@ export class Gallery {
    * cursor は「何件目から」
    */
   async list(opts: { kind: Kind; offset: number; limit: number; tag?: number | "none" | "any"; q?: string }) {
-    let files = await this.allFiles(opts.kind);
+    const [all] = await Promise.all([this.allFiles(opts.kind), this.ensureTags()]);
+    let files = all;
     const tagsOf = (f: GalleryFile) => this.tagsOf(f.path, f.saved);
     if (opts.tag === "none") files = files.filter((f) => tagsOf(f).length === 0);
     else if (opts.tag === "any") files = files.filter((f) => tagsOf(f).length > 0);
@@ -529,7 +568,7 @@ export class Gallery {
   }
 
   async info(path: string) {
-    const [geninfo, sources] = await Promise.all([this.geninfo(path), this.sources(path)]);
+    const [geninfo, sources] = await Promise.all([this.geninfo(path), this.sources(path), this.ensureTags()]);
     return { geninfo, tags: this.tagsOf(path, await this.isSaved(path)), sources };
   }
 
@@ -540,6 +579,7 @@ export class Gallery {
    * 付け外し後の状態 (移した先・タグ・元画像) を file で返す
    */
   async toggleTag(path: string, tagId: number) {
+    await this.ensureTags();
     const saved = await this.isSaved(path);
     const paths = [path, ...(await this.sources(path)).map((s) => s.path)];
     const current = this.tagsOf(path, saved).map((t) => t.id);
@@ -619,7 +659,7 @@ export class Gallery {
     const store = await this.savedTags();
     for (const m of moves) store.delete(basename(m.from));
     // 戻した先に IIB のタグが残っていれば外す (戻した途端にタグ付き扱いにならないように)
-    for (const t of this.customTags()) {
+    for (const t of this.tags().all) {
       const hit = moves.map((m) => m.to).filter((p) => this.tagsOf(p).some((x) => x.id === t.id));
       if (!hit.length) continue;
       await this.post("/db/batch_update_image_tag", { img_paths: hit, action: "remove", tag_id: t.id }).catch(() => {});
@@ -630,7 +670,7 @@ export class Gallery {
 
   /** 出力フォルダで IIB のタグが付いているもの (保管庫を使う前に付けた分) */
   async taggedInOutput() {
-    this.invalidateTags();
+    await this.refreshTags();
     const has = (f: GalleryFile) => this.tagsOf(f.path).length > 0;
     return { grids: (await this.files("grid")).filter(has), images: (await this.files("image")).filter(has) };
   }
@@ -703,7 +743,7 @@ export class Gallery {
    * - keepSince より新しいもの (今日の分など) は残す
    */
   async cleanupTargets(keepSince: number) {
-    this.invalidateTags();
+    await this.refreshTags();
     const grids = await this.files("grid");
     const images = await this.files("image");
     const map = await this.outputMap();

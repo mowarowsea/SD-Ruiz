@@ -181,6 +181,8 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - 保管庫は IIB の索引に入っていないので、プロンプト検索は PNG の生成情報を BFF が直接読む
   - 昔の Save の grid には Dynamic Prompts の展開前の構文 (Template) が残っていない
 - タグの種類 (Like / useful / temp など) は IIB のカスタムタグ。出力フォルダのタグは IIB の DB (`iib.db`) を読み取り専用で参照する (保管庫を使う前に IIB で付けた分)
+  - DB の読み込みは全走査で 1 秒ほどかかるので、別スレッドで読む。1 分たったら次に開いたときに裏で読み直し、それまでは手元の分を返す (開くたびに待たせない)。整理の対象を出すときだけは読み直しを待つ
+  - BFF の起動時にフォルダの一覧とタグを先に読んでおく (ギャラリーを初めて開いたときに待たせないため)
 - サムネイル・元画像・生成情報・プロンプト検索は IIB の API を BFF が中継する
 - grid と元画像の名前: 生成のたびに `override_settings` で `samples_filename_pattern: "[seed]-[job_timestamp]"` と `grid_extended_filename: true` を送り、grid と元画像の名前の末尾に同じ生成 ID (job_timestamp。1 回の生成の間は同じ値) を付ける (`00123-<seed>-20261004153012.png` / `grid-0020-<seed>-20261004153012.jpg`)。Forge 側にも設定として残るので、Forge の画面から生成した分も同じ名前になる
 - grid と元画像の対応: 生成 ID の付いた grid は、同じ生成 ID の単体画像。生成 ID の無い古いもの (2026-10-04 より前) は、ID の無い単体画像の中から「1 つ前の grid から、この grid までの間に保存された単体画像」(IIB Manager と同じ考え方) のうち、grid との時間差が 2 分以内のもの。
