@@ -26,6 +26,7 @@ export function GeneratePage({
   typing,
   active,
   onCheckpointDeleted,
+  onReloadCheckpoints,
 }: {
   meta: Meta | null;
   forge: ForgeStatus | null;
@@ -38,6 +39,8 @@ export function GeneratePage({
   /** 生成画面を開いているか (隠れているときは Ctrl+Enter で生成しない) */
   active: boolean;
   onCheckpointDeleted: (title: string) => void;
+  /** Forge に Checkpoint を読み直してもらい、一覧を取り直す */
+  onReloadCheckpoints: () => Promise<void>;
 }) {
   const patch = (p: Partial<GenerateParams>) => setForm((f) => ({ ...f, ...p }));
   const { job, last, progress, refresh } = jobState;
@@ -238,6 +241,7 @@ export function GeneratePage({
             onCheckpointDeleted(title);
             void reloadPrefs();
           }}
+          onRefresh={onReloadCheckpoints}
         />
       )}
       <RecommendSheet open={sheet === "recommend"} onClose={() => setSheet(null)} view={recommend.view} meta={meta} onRefresh={recommend.refresh} onUse={applySample} />

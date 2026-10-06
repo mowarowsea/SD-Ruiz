@@ -101,6 +101,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
   - モデルごとに前回のパラメータ (サイズ / Steps / CFG / Sampler / Scheduler) を記憶し、切り替え時に復元する (復元したことを一言表示)。前回の値が無ければベースモデルの既定のパラメータにする (「Anima の既定にしました」)
 - お気に入り・最近・モデルごとの設定・ベースモデルの既定は BFF の `data/prefs.json` に保存し、端末をまたいで共有する
 - 削除: シート右上の「削除」で削除モードにし、カードをタップすると確認してから消す (LoRA も同じ)
+- 再読込: シート右上の「再読込」で Forge に一覧を読み直してもらう (`/sdapi/v1/refresh-checkpoints` / `refresh-loras`)。フォルダに足したモデルを Forge の再起動なしで出す (LoRA も同じ)
   - 本体と付随ファイル (プレビュー画像・`cm-info.json`・`civitai.info`・`.json`) をゴミ箱フォルダの `models/Stable-diffusion/` (LoRA は `models/Lora/`) へ移し、Forge に一覧を読み直してもらう (`refresh-checkpoints` / `refresh-loras`)
   - 生成中は消さない。Forge が開いていて動かせないときはエラーを出して何もしない
   - お気に入り・最近・モデルごとのパラメータからも外す

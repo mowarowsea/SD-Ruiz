@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { baseLabel, forgetLora, type Lora, loadLoras, type Prefs } from "../api";
+import { baseLabel, forgetLora, type Lora, loadLoras, type Prefs, reloadLoras } from "../api";
 import { Sheet } from "./Sheet";
 import { usePersistentState } from "../hooks";
-import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
+import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChips, RefreshButton, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
 
 type Filter = "all" | "fav" | "used" | `folder:${string}`;
 
@@ -84,6 +84,18 @@ export function LoraSheet({
       aside={
         <span className="flex items-center gap-2">
           {loras && `${fits.length} LoRA`}
+          <RefreshButton
+            onRefresh={() =>
+              reloadLoras().then(
+                (ls) => {
+                  setLoras(ls);
+                  setError(null);
+                  setDeleteError(null);
+                },
+                (e) => setDeleteError((e as Error).message),
+              )
+            }
+          />
           <DeleteModeButton on={deleting} onChange={setDeleting} />
         </span>
       }

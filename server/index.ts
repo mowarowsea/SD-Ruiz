@@ -233,7 +233,18 @@ server.get<{ Params: { kind: string }; Querystring: { id: string } }>("/api/thum
   return reply.type("image/webp").header("cache-control", "private, max-age=604800").send(await thumbnail(preview));
 });
 
-// Checkpoint / LoRA の削除: 付随ファイルごとゴミ箱フォルダの models/ へ移し、Forge に一覧を読み直してもらう
+// Checkpoint / LoRA の一覧を Forge に読み直してもらう (フォルダに足したファイルを再起動なしで出す)。一覧そのものは呼んだ側が取り直す
+server.post<{ Body: { kind: "checkpoint" | "lora" } }>(
+  "/api/models/refresh",
+  { schema: { body: { type: "object", required: ["kind"], properties: { kind: { enum: ["checkpoint", "lora"] } } } } },
+  async (req) => {
+    await (req.body.kind === "checkpoint" ? forge.refreshCheckpoints() : forge.refreshLoras());
+    sidecars.clear();
+    return { ok: true };
+  },
+);
+
+// Checkpoint / LoRA の削除:付随ファイルごとゴミ箱フォルダの models/ へ移し、Forge に一覧を読み直してもらう
 server.post<{ Body: { kind: "checkpoint" | "lora"; id: string } }>(
   "/api/models/delete",
   { schema: { body: { type: "object", required: ["kind", "id"], properties: { kind: { enum: ["checkpoint", "lora"] }, id: { type: "string" } } } } },

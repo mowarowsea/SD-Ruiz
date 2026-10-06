@@ -105,6 +105,10 @@ export function App() {
             typing={typing}
             active={nav.tab === "generate"}
             onCheckpointDeleted={(title) => setMeta((m) => m && { ...m, models: m.models.filter((x) => x.title !== title) })}
+            onReloadCheckpoints={async () => {
+              await api.refreshModels("checkpoint");
+              setMeta(await api.meta());
+            }}
           />
         </div>
         {(nav.tab === "gallery" || galleryOpened.current) && (

@@ -1,4 +1,4 @@
-import { faTrashCan } from "@fortawesome/free-solid-svg-icons";
+import { faArrowRotateRight, faTrashCan } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useState } from "react";
 import { api } from "../api";
@@ -77,6 +77,28 @@ export function DeleteModeButton({ on, onChange }: { on: boolean; onChange: (on:
     >
       <FontAwesomeIcon icon={faTrashCan} className="text-[10px]" />
       {on ? "削除モード中" : "削除"}
+    </button>
+  );
+}
+
+/** シートの右上に置く再読込ボタン。Forge に一覧を読み直してもらい、フォルダに足したファイルを再起動なしで出す */
+export function RefreshButton({ onRefresh }: { onRefresh: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <button
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await onRefresh();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      disabled={busy}
+      className="flex items-center gap-1 rounded-full border border-line px-2.5 py-0.5 text-[11px] text-muted disabled:opacity-60"
+    >
+      <FontAwesomeIcon icon={faArrowRotateRight} className={`text-[10px] ${busy ? "animate-spin" : ""}`} />
+      {busy ? "読込中…" : "再読込"}
     </button>
   );
 }

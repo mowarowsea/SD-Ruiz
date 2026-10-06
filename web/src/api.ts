@@ -283,6 +283,8 @@ export const api = {
   refreshRecommend: (id: string) => post<RecommendView>("/api/recommend/refresh", { id }),
   /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
   deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
+  /** Forge に一覧を読み直してもらう (フォルダに足したモデルを出す) */
+  refreshModels: (kind: "checkpoint" | "lora") => post<{ ok: boolean }>("/api/models/refresh", { kind }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,
   gallery: (opts: { kind: GalleryKind; offset?: number; q?: string; tag?: number | "none" | "any" | null }) => {
     const p = new URLSearchParams({ kind: opts.kind });
@@ -336,6 +338,13 @@ export function loadLoras(): Promise<Lora[]> {
       lorasCache = null;
       throw e;
     }));
+}
+
+/** Forge に読み直してもらってから LoRA 一覧を取り直す */
+export async function reloadLoras(): Promise<Lora[]> {
+  await api.refreshModels("lora");
+  lorasCache = null;
+  return loadLoras();
 }
 
 /** 消した LoRA をキャッシュからも外す */

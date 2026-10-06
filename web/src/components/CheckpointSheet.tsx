@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { baseLabel, type Model, modelFolder, modelLabel, type Prefs } from "../api";
 import { Sheet } from "./Sheet";
 import { usePersistentState } from "../hooks";
-import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChips, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
+import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChips, RefreshButton, SortButton, type SortBy, sortItems, Star, Thumb } from "./Thumb";
 
 type Filter = "all" | "fav" | "recent" | `folder:${string}`;
 
@@ -16,6 +16,7 @@ export function CheckpointSheet({
   onSelect,
   onFavorite,
   onDeleted,
+  onRefresh,
 }: {
   open: boolean;
   onClose: () => void;
@@ -25,6 +26,8 @@ export function CheckpointSheet({
   onSelect: (title: string) => void;
   onFavorite: (title: string, on: boolean) => void;
   onDeleted: (title: string) => void;
+  /** Forge に読み直してもらい、一覧を取り直す */
+  onRefresh: () => Promise<void>;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -66,6 +69,14 @@ export function CheckpointSheet({
       aside={
         <span className="flex items-center gap-2">
           {models.length} models
+          <RefreshButton
+            onRefresh={() =>
+              onRefresh().then(
+                () => setError(null),
+                (e) => setError((e as Error).message),
+              )
+            }
+          />
           <DeleteModeButton on={deleting} onChange={setDeleting} />
         </span>
       }
