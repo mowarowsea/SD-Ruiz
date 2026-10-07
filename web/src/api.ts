@@ -283,6 +283,8 @@ export const api = {
   refreshRecommend: (id: string) => post<RecommendView>("/api/recommend/refresh", { id }),
   /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
   deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
+  /** タグの付いた画像のうち、そのモデルで生成された枚数 */
+  modelUsage: (kind: "checkpoint" | "lora", id: string) => request<{ tagged: number }>(`/api/models/usage?kind=${kind}&id=${encodeURIComponent(id)}`),
   /** Forge に一覧を読み直してもらう (フォルダに足したモデルを出す) */
   refreshModels: (kind: "checkpoint" | "lora") => post<{ ok: boolean }>("/api/models/refresh", { kind }),
   thumbUrl: (kind: "checkpoint" | "lora", id: string) => `/api/thumb/${kind}?id=${encodeURIComponent(id)}`,

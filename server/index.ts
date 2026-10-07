@@ -5,7 +5,7 @@ import fastifyCompress from "@fastify/compress";
 import fastifyStatic from "@fastify/static";
 import Fastify from "fastify";
 import sharp from "sharp";
-import { join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { loadConfig } from "./config.js";
 import { TagDictionary } from "./dictionary.js";
 import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./forge-doctor.js";
@@ -242,6 +242,35 @@ server.post<{ Body: { kind: "checkpoint" | "lora" } }>(
     sidecars.clear();
     return { ok: true };
   },
+);
+
+const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * 生成情報にその Checkpoint / LoRA が使われているかを見る関数。
+ * Checkpoint は "Model: <名前>," か "Model hash: <ハッシュ>"、LoRA はプロンプトの <lora:<名前>:…> か "Lora hashes" の中の名前
+ */
+async function modelUsedIn(kind: "checkpoint" | "lora", id: string): Promise<(geninfo: string) => boolean> {
+  if (kind === "checkpoint") {
+    const m = (await forge.models()).find((x) => x.title === id);
+    // 生成情報の "Model:" はフォルダを除いたファイル名 (拡張子なし)
+    const file = basename((m?.filename ?? id.replace(/\s*\[[0-9a-f]+\]$/i, "")).replace(/\\/g, "/"));
+    const name = file.slice(0, file.length - extname(file).length);
+    const hash = /\[([0-9a-f]{8,})\]$/i.exec(id)?.[1];
+    const re = new RegExp(`(^|[\\s,])Model: ${escapeRe(name)}(,|$)` + (hash ? `|Model hash: ${hash}\\b` : ""), "im");
+    return (s) => re.test(s);
+  }
+  const l = (await forge.loras()).find((x) => x.name === id);
+  const names = [...new Set([id, l?.alias].filter((x): x is string => !!x))].map(escapeRe).join("|");
+  const re = new RegExp(`<lora:(${names}):|Lora hashes: "([^"]*, )?(${names}): `, "i");
+  return (s) => re.test(s);
+}
+
+// 削除の前に:タグの付いた画像にその Checkpoint / LoRA が使われている枚数
+server.get<{ Querystring: { kind: "checkpoint" | "lora"; id: string } }>(
+  "/api/models/usage",
+  { schema: { querystring: { type: "object", required: ["kind", "id"], properties: { kind: { enum: ["checkpoint", "lora"] }, id: { type: "string" } } } } },
+  async (req) => ({ tagged: await gallery.countTaggedUsing(await modelUsedIn(req.query.kind, req.query.id)) }),
 );
 
 // Checkpoint / LoRA の削除:付随ファイルごとゴミ箱フォルダの models/ へ移し、Forge に一覧を読み直してもらう

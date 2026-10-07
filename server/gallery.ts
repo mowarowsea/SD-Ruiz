@@ -445,7 +445,7 @@ export class Gallery {
     };
   }
 
-  /** 保管庫の画像の生成情報 (検索用)。保管庫は IIB の索引に入っていないので自前で読む */
+  /** 画像の生成情報 (保管庫の検索用。保管庫は IIB の索引に入っていないので自前で読む)。PNG は直接、それ以外は IIB から */
   private textCache = new Map<string, { mtime: number; text: string }>();
   private async savedText(f: GalleryFile) {
     const c = this.textCache.get(f.path);
@@ -692,6 +692,17 @@ export class Gallery {
       moved++;
     }
     return { moved };
+  }
+
+  /**
+   * タグの付いた単体画像 (保管庫 + 出力フォルダで IIB のタグが付いたもの) のうち、生成情報が used に当てはまる枚数。
+   * Checkpoint / LoRA を消す前の確認に使う。grid は元画像と重なるので数えない
+   */
+  async countTaggedUsing(used: (geninfo: string) => boolean) {
+    const [s, out] = await Promise.all([this.savedIndex(), this.files("image"), this.ensureTags()]);
+    const files = [...s.images, ...out.filter((f) => this.tagsOf(f.path).length > 0)];
+    const hits = await Promise.all(files.map(async (f) => used(await this.savedText(f))));
+    return hits.filter(Boolean).length;
   }
 
   // ---- 削除・整理 (ゴミ箱フォルダへの移動) ----

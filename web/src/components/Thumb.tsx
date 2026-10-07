@@ -112,9 +112,35 @@ export function DeleteMark({ className = "" }: { className?: string }) {
   );
 }
 
-/** 確認してから削除する。成功したら true */
+/** 削除の途中のもの (確認を待つ間に重ねてタップしても 1 回だけ消す) */
+const removing = new Set<string>();
+
+/**
+ * 削除する。ギャラリーでタグの付いた画像に使われているものだけ確認を出し、それ以外はすぐ消す
+ * (付随ファイルごとゴミ箱フォルダへ移すので、「ゴミ箱を空にする」までは元に戻せる)。成功したら true
+ */
 export async function confirmDeleteModel(kind: "checkpoint" | "lora", id: string, onError: (msg: string) => void) {
-  if (!confirm(`${id} を削除しますか？\nプレビュー画像などの付随ファイルごとゴミ箱フォルダへ移します (「ゴミ箱を空にする」までは元に戻せます)`)) return false;
+  const k = `${kind}:${id}`;
+  if (removing.has(k)) return false;
+  removing.add(k);
+  try {
+    return await deleteModel(kind, id, onError);
+  } finally {
+    removing.delete(k);
+  }
+}
+
+async function deleteModel(kind: "checkpoint" | "lora", id: string, onError: (msg: string) => void) {
+  const what = kind === "checkpoint" ? "モデル" : "LoRA";
+  const tagged = await api.modelUsage(kind, id).then(
+    (r) => r.tagged,
+    () => null,
+  );
+  if (tagged === null) {
+    if (!confirm(`${id} がタグの付いた画像に使われているかを確かめられませんでした。\nそれでも削除しますか？`)) return false;
+  } else if (tagged > 0) {
+    if (!confirm(`${id} は、ギャラリーでタグの付いた画像 ${tagged.toLocaleString()} 枚に使われている${what}です。\n消してもいいですか？`)) return false;
+  }
   try {
     await api.deleteModel(kind, id);
     return true;
