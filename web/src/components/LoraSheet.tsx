@@ -1,3 +1,5 @@
+import { faCircleInfo } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useEffect, useMemo, useState } from "react";
 import { baseLabel, forgetLora, type Lora, loadLoras, type Prefs, reloadLoras } from "../api";
 import { Sheet } from "./Sheet";
@@ -8,7 +10,7 @@ type Filter = "all" | "fav" | "used" | `folder:${string}`;
 
 /**
  * LoRA 選択。タップでプロンプトに足す / 外す (続けて何個でも選べるよう、シートは開いたまま)。削除モードではタップで削除する。
- * 今のモデルに合うもの (ベースモデルの構造が同じもの。どちらかが分からなければ合うことにする) だけを出す
+ * 今のモデルに合うもの (ベースモデルの構造が同じもの。どちらかが分からなければ合うことにする) だけを出す。(i) でその LoRA の推奨と作例を開く
  */
 export function LoraSheet({
   open,
@@ -20,6 +22,7 @@ export function LoraSheet({
   onToggle,
   onFavorite,
   onDeleted,
+  onRecommend,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +35,8 @@ export function LoraSheet({
   onToggle: (lora: Lora) => void;
   onFavorite: (name: string, on: boolean) => void;
   onDeleted: (name: string) => void;
+  /** その LoRA の推奨と作例を開く */
+  onRecommend: (name: string) => void;
 }) {
   const [loras, setLoras] = useState<Lora[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -120,7 +125,7 @@ export function LoraSheet({
             <li key={l.name} className="relative">
               <button
                 onClick={() => (deleting ? remove(l) : onToggle(l))}
-                className={`flex w-full items-center gap-3 rounded-xl border p-2 pr-10 text-left ${deleting ? "border-danger/60 bg-surface" : on ? "border-accent bg-accent/10" : "border-line bg-surface"}`}
+                className={`flex w-full items-center gap-3 rounded-xl border p-2 pr-[4.5rem] text-left ${deleting ? "border-danger/60 bg-surface" : on ? "border-accent bg-accent/10" : "border-line bg-surface"}`}
               >
                 <div className="relative flex-none">
                   <Thumb kind="lora" id={l.name} has={l.preview} className="size-14 rounded-lg" />
@@ -139,6 +144,11 @@ export function LoraSheet({
                   {l.trainedWords.length > 0 && <div className="mt-0.5 truncate font-mono text-[10px] text-muted/80">{l.trainedWords.join(", ")}</div>}
                 </div>
               </button>
+              {!deleting && (
+                <button aria-label="推奨と作例" onClick={() => onRecommend(l.name)} className="absolute top-1/2 right-9 grid size-8 -translate-y-1/2 place-items-center text-sm text-muted">
+                  <FontAwesomeIcon icon={faCircleInfo} />
+                </button>
+              )}
               {!deleting && <Star on={favs.has(l.name)} onClick={() => onFavorite(l.name, !favs.has(l.name))} className="absolute top-1/2 right-1 -translate-y-1/2 text-accent" />}
             </li>
           );

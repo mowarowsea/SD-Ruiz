@@ -138,19 +138,23 @@ server.get("/api/meta", async () => {
 });
 
 // モデルの推奨設定と作例 (status は RecommendStore.view)
-async function modelRef(checkpoint: string) {
-  if (!checkpointPaths.has(checkpoint)) await fetchModels();
-  const file = checkpointPaths.get(checkpoint);
+// Checkpoint は /api/meta で裏でまとめて取る。LoRA は数が多いので、開いたときにだけ (先に) 取る
+async function modelRef(id: string, kind: string | undefined) {
+  const lora = kind === "lora";
+  const paths = lora ? loraPaths : checkpointPaths;
+  if (!paths.has(id)) await (lora ? fetchLoras() : fetchModels());
+  const file = paths.get(id);
   return file ? { file, civitai: sidecars.get(file).civitai } : null;
 }
 
-server.get<{ Querystring: { id?: string } }>("/api/recommend", async (req) => {
-  const ref = await modelRef(req.query.id ?? "");
+server.get<{ Querystring: { id?: string; kind?: string } }>("/api/recommend", async (req) => {
+  const ref = await modelRef(req.query.id ?? "", req.query.kind);
+  if (ref && req.query.kind === "lora") recommend.ensure([ref], null, true);
   return ref ? recommend.view(ref) : { status: "none", url: null, entry: null };
 });
 
-server.post<{ Body: { id?: string } }>("/api/recommend/refresh", async (req) => {
-  const ref = await modelRef(req.body.id ?? "");
+server.post<{ Body: { id?: string; kind?: string } }>("/api/recommend/refresh", async (req) => {
+  const ref = await modelRef(req.body.id ?? "", req.body.kind);
   if (!ref) return { status: "none", url: null, entry: null };
   const [samplers, schedulers] = await Promise.all([forge.samplers(), forge.schedulers()]);
   recommend.refresh(ref, { samplers: samplers.map((s) => s.name), schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })) });

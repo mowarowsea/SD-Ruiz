@@ -1,7 +1,7 @@
 import { faChevronRight, faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
-import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, modelFolder, modelLabel, type Progress } from "../api";
+import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, type ModelKind, modelFolder, modelLabel, type Progress } from "../api";
 import { CheckpointSheet } from "../components/CheckpointSheet";
 import { FindReplace } from "../components/FindReplace";
 import { LoraChips } from "../components/LoraChips";
@@ -67,9 +67,9 @@ export function GeneratePage({
   const rec = recommend.view?.entry?.rec ?? null;
   const sampleCount = recommend.view?.entry?.samples.length ?? 0;
   useEffect(() => setPromptPresets({ quality: rec?.quality ?? null, negative: rec?.negative ?? null }), [rec]);
-  // Checkpoint の一覧から開いた、別のモデルの推奨と作例。閉じたら一覧に戻る
-  const [browsing, setBrowsing] = useState<string | null>(null);
-  const browse = useRecommend(browsing ?? "");
+  // Checkpoint / LoRA の一覧から開いた推奨と作例。閉じたら一覧に戻る
+  const [browsing, setBrowsing] = useState<{ kind: ModelKind; id: string } | null>(null);
+  const browse = useRecommend(browsing?.id ?? "", browsing?.kind);
   // 作例を使って閉じたときは、一覧に戻らない
   const usedSample = useRef(false);
   const applySample = (p: Partial<GenerateParams>, skipped: string[], checkpoint?: string) => {
@@ -251,7 +251,7 @@ export function GeneratePage({
           onRefresh={onReloadCheckpoints}
           onRecommend={(title) => {
             if (title === form.checkpoint) return setSheet("recommend");
-            setBrowsing(title);
+            setBrowsing({ kind: "checkpoint", id: title });
             setSheet(null);
           }}
         />
@@ -261,17 +261,23 @@ export function GeneratePage({
         open={!!browsing}
         onClose={() => {
           setBrowsing(null);
-          setSheet(usedSample.current ? null : "checkpoint");
+          setSheet(usedSample.current ? null : (browsing?.kind ?? null));
           usedSample.current = false;
         }}
         view={browse.view}
         meta={meta}
         onRefresh={browse.refresh}
         onUse={(p, skipped) => {
+          if (!browsing) return;
           usedSample.current = true;
-          applySample(p, skipped, browsing!);
+          if (browsing.kind === "checkpoint") return applySample(p, skipped, browsing.id);
+          // LoRA の作例: 作例のプロンプトの <lora:> は作者のファイル名なので、この LoRA が無ければ足す (重みは推奨があればそれ)
+          const has = p.prompt !== undefined && findLoras(p.prompt).some((u) => u.name === browsing.id);
+          const weight = browse.view?.entry?.rec?.weight;
+          applySample(p.prompt === undefined || has ? p : { ...p, prompt: addLora(p.prompt, browsing.id, weight?.best ?? weight?.max ?? 1) }, skipped);
         }}
-        other={browsing ? modelLabel(browsing) : undefined}
+        name={browsing ? (browsing.kind === "checkpoint" ? modelLabel(browsing.id) : browsing.id) : undefined}
+        useNote={browsing?.kind === "checkpoint" ? "Checkpoint もこのモデルに切り替えます" : browsing ? "この LoRA がプロンプトに無ければ末尾に足します" : undefined}
       />
       <LoraSheet
         open={sheet === "lora"}
@@ -283,6 +289,10 @@ export function GeneratePage({
         onToggle={(l) => toggleLora(l.name)}
         onFavorite={(id, on) => setFavorite("lora", id, on)}
         onDeleted={() => void reloadPrefs()}
+        onRecommend={(name) => {
+          setBrowsing({ kind: "lora", id: name });
+          setSheet(null);
+        }}
       />
     </div>
   );

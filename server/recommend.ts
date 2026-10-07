@@ -31,6 +31,10 @@ export interface Recommendation {
   negative: string | null;
   /** そのほかの注意 (日本語、1 行 1 つ) */
   notes: string[];
+  /** LoRA の重み (Checkpoint では null。前に取ったものには無い) */
+  weight?: Range | null;
+  /** LoRA のトリガーワード (使い分けがあれば説明つき) */
+  triggers?: string[];
 }
 
 /** 作例。作者のもの (生成情報の無いものも) と、足りなければほかの人の投稿 (生成情報のあるものだけ) */
@@ -233,8 +237,8 @@ async function collectSamples(versionId: number, versionImages: Record<string, a
   return [...pinned, ...author, ...others];
 }
 
-/** 作例の設定を LLM に渡す形にまとめる (多いものから) */
-function summarizeSamples(all: Sample[]) {
+/** 作例の設定を LLM に渡す形にまとめる (多いものから)。LoRA ならプロンプトの <lora:名前:重み> も */
+function summarizeSamples(all: Sample[], isLora: boolean) {
   const samples = all.filter((s) => !s.noInfo);
   if (!samples.length) return "(作例の生成情報なし)";
   const count = (vals: (string | number | null)[]) => {
@@ -251,6 +255,7 @@ function summarizeSamples(all: Sample[]) {
     `size: ${count(samples.map((s) => `${s.width}x${s.height}`).filter(isGenerationSize))}`,
     `clip skip: ${count(samples.map((s) => s.clipSkip))}`,
     `negative の例: ${samples.find((s) => s.negative)?.negative.slice(0, 300) ?? "-"}`,
+    ...(isLora ? [`プロンプトの LoRA と重み: ${count(samples.flatMap((s) => [...s.prompt.matchAll(/<lora:([^:>]+):([\d.]+)/gi)].map((m) => `${m[1]}:${m[2]}`)))}`] : []),
   ].join("\n");
 }
 
@@ -264,11 +269,14 @@ const schemaHint = `{
   "hires": string|null,
   "quality": string|null,
   "negative": string|null,
-  "notes": string[]
+  "notes": string[],
+  "weight": {"min": number|null, "max": number|null, "best": number|null} | null,
+  "triggers": string[]
 }`;
 
-function buildPrompt(name: string, description: string, samples: Sample[], names: ForgeNames) {
-  return `Stable Diffusion のモデル「${name}」の Civitai の説明文と、作者の作例の設定から、推奨の生成設定を読み取って JSON で答えてください。
+/** isLora: LoRA なら重みとトリガーワードも読み取る。trainedWords は Civitai に登録されたトリガーワード */
+function buildPrompt(name: string, description: string, samples: Sample[], names: ForgeNames, isLora: boolean, trainedWords: string[]) {
+  return `Stable Diffusion の${isLora ? " LoRA" : "モデル"}「${name}」の Civitai の説明文と、作例の設定から、推奨の生成設定を読み取って JSON で答えてください。
 
 形式:
 ${schemaHint}
@@ -284,14 +292,21 @@ ${schemaHint}
 - quality: プロンプトの先頭に入れるよう勧めているクオリティタグをそのまま (例 "masterpiece, best quality, newest")
 - negative: 勧めているネガティブプロンプトをそのまま
 - hires: Hires fix の勧め (倍率・Denoise・アップスケーラーなど) を日本語で短く
-- notes: そのほか生成に関わる大事な注意 (VAE、プロンプトの書き方、苦手なことなど) を日本語で 1 つ 40 字以内、最大 5 つ。ほかの項目 (steps / cfg / sampler / scheduler / サイズ / clip skip / hires / quality / negative) と同じことは書かない。宣伝・更新履歴・お礼・ライセンス・規約は入れない
+${
+  isLora
+    ? `- weight: LoRA の重み (<lora:名前:重み> の数字)。範囲なら min と max、おすすめが 1 つなら best。説明文に無ければ作例のプロンプトの重み (多いもの) から
+- triggers: プロンプトに入れるトリガーワード。説明文で使い分け (衣装ごとなど) が書かれていれば「word (日本語で短く用途)」の形。Civitai に登録されたもの: ${trainedWords.join(" / ") || "なし"}
+- LoRA の説明文に生成設定 (steps / cfg / sampler など) が書かれていなければ、作例の設定から埋めず null か [] にする (作例は作者がたまたま使った設定のことが多いので)`
+    : `- weight: null、triggers: [] (Checkpoint なので)`
+}
+- notes: そのほか生成に関わる大事な注意 (VAE、プロンプトの書き方、苦手なこと、合うベースモデルなど) を日本語で 1 つ 40 字以内、最大 5 つ。ほかの項目 (steps / cfg / sampler / scheduler / サイズ / clip skip / hires / quality / negative / weight / triggers) と同じことは書かない。宣伝・更新履歴・お礼・ライセンス・規約は入れない
 
 説明文:
 """
 ${description.slice(0, 12_000)}
 """
 
-${summarizeSamples(samples)}`;
+${summarizeSamples(samples, isLora)}`;
 }
 
 async function askGroq(apiKey: string, model: string, prompt: string): Promise<Recommendation> {
@@ -335,8 +350,11 @@ export function tidy(rec: Recommendation, names: ForgeNames): Recommendation {
     ...rec,
     samplers: uniq(rec.samplers.map((s) => names.samplers.find((x) => lc(x) === lc(s)) ?? s)),
     schedulers: uniq(rec.schedulers.map((s) => names.schedulers.find((x) => lc(x.name) === lc(s) || lc(x.label) === lc(s))?.name ?? s)),
+    weight: rec.weight ?? null,
+    triggers: rec.triggers ?? [],
     notes: rec.notes
       .filter((n) => !/clip ?skip|steps?\b|cfg|sampler|サンプラ|scheduler|スケジューラ|サイズ|解像度|\d+\s*[x×]\s*\d+/i.test(n))
+      .filter((n) => !(rec.weight && /重み|強さ|weight/i.test(n)))
       .filter((n) => !/商用|共有|宣伝|広告|ライセンス|規約|責任|アップロード|転載|クレジット|報告/.test(n))
       .slice(0, 5),
   };
@@ -370,6 +388,8 @@ function normalizeRec(j: Record<string, unknown>): Recommendation {
     quality: text(j.quality),
     negative: text(j.negative),
     notes: strings(j.notes).slice(0, 8),
+    weight: normalizeRange(j.weight),
+    triggers: strings(j.triggers),
   };
 }
 
@@ -463,9 +483,13 @@ export class RecommendStore {
     return [this.current, ...this.queue].some((j) => j && (j.kind === "hash" ? j.file === ref.file : jobVersion(j) === ids?.versionId));
   }
 
-  /** まだ取っていない (か、失敗してから時間が経った) モデルを取りにいく。付随ファイルの無いものはハッシュから Civitai の ID を引く */
-  ensure(refs: ModelRef[], names: ForgeNames) {
-    this.names = names;
+  /**
+   * まだ取っていない (か、失敗してから時間が経った) モデルを取りにいく。付随ファイルの無いものはハッシュから Civitai の ID を引く。
+   * first: 開いたものを先に取る (LoRA は数が多いので、開いたときにだけ取る)
+   */
+  ensure(refs: ModelRef[], names: ForgeNames | null, first = false) {
+    if (names) this.names = names;
+    const jobs: Job[] = [];
     const hashJobs: Job[] = [];
     for (const ref of refs) {
       if (this.isQueued(ref)) continue;
@@ -479,11 +503,12 @@ export class RecommendStore {
       const e = this.entries[ids.versionId];
       // キーを後から足したら、作例だけのものも取り直す
       const stale = !e || (e.status === "error" && Date.now() - e.fetchedAt > retryAfterError) || (e.status === "no-llm" && this.groq.apiKey);
-      if (stale) this.queue.push({ kind: "fetch", ids });
+      if (stale) jobs.push({ kind: "fetch", ids });
       // 作例の集め方を変える前に取ったものは、作例だけ集め直す (画像の保存も)
-      else if (e.samplesKey !== samplesKey(this.pinnedUsers) && e.status !== "gone") this.queue.push({ kind: "samples", versionId: ids.versionId });
+      else if (e.samplesKey !== samplesKey(this.pinnedUsers) && e.status !== "gone") jobs.push({ kind: "samples", versionId: ids.versionId });
     }
-    this.queue.push(...hashJobs);
+    if (first) this.queue.unshift(...jobs, ...hashJobs);
+    else this.queue.push(...jobs, ...hashJobs);
     void this.drain();
   }
 
@@ -566,7 +591,10 @@ export class RecommendStore {
       const done = { ...base, name, samples, imagesTriedAt: Date.now(), samplesKey: samplesKey(this.pinnedUsers) };
       if (!this.groq.apiKey) return { ...done, status: "no-llm", error: null, rec: null };
       const description = [htmlToText(String(model.description ?? "")), htmlToText(String(version.description ?? ""))].filter(Boolean).join("\n\n--- このバージョンの説明 ---\n");
-      const rec = await askGroq(this.groq.apiKey, this.groq.model, buildPrompt(name, description, samples, this.names));
+      // Civitai のモデルの種類 (Checkpoint / LORA / LoCon / DoRA ...)
+      const isLora = /lora|locon|dora|lycoris/i.test(String(model.type ?? ""));
+      const trainedWords = Array.isArray(version.trainedWords) ? version.trainedWords.map(String) : [];
+      const rec = await askGroq(this.groq.apiKey, this.groq.model, buildPrompt(name, description, samples, this.names, isLora, trainedWords));
       return { ...done, status: "ok", error: null, rec };
     } catch (e) {
       // 消されたモデルは取り直さない。取れなかったときは、前に取ってあった推奨と作例を残す

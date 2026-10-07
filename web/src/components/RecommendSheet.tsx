@@ -10,7 +10,7 @@ import { Sheet } from "./Sheet";
 /** R18 (nsfwLevel: 4 R / 8 X / 16 XXX) */
 const isR18 = (s: Sample) => s.nsfwLevel >= 4;
 
-/** モデルの推奨設定と作者の作例。作例のプロンプト・設定を生成画面に入れられる */
+/** モデル (Checkpoint / LoRA) の推奨設定と作例。作例のプロンプト・設定を生成画面に入れられる */
 export function RecommendSheet({
   open,
   onClose,
@@ -18,7 +18,8 @@ export function RecommendSheet({
   meta,
   onRefresh,
   onUse,
-  other,
+  name,
+  useNote,
 }: {
   open: boolean;
   onClose: () => void;
@@ -27,8 +28,10 @@ export function RecommendSheet({
   onRefresh: () => Promise<void>;
   /** 作例を使う。skipped は Forge に合わずに入れなかった項目 */
   onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void;
-  /** いま選んでいるのとは別のモデル (一覧から開いたとき) の名前。作例を使うとこのモデルにも切り替える */
-  other?: string;
+  /** Civitai の名前が分かるまで出すモデルの名前 (一覧から開いたとき) */
+  name?: string;
+  /** 作例を使うときに、上書きのほかにすること (「Checkpoint もこのモデルに切り替えます」など) */
+  useNote?: string;
 }) {
   const [selected, setSelected] = useState<Sample | null>(null);
   const [opts, setOpts] = usePersistentState("ruiz.samples", { r18: false });
@@ -61,16 +64,16 @@ export function RecommendSheet({
   if (selected)
     return (
       <Sheet open={open} onClose={close} title="作例" aside={link}>
-        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} other={other} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
+        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} useNote={useNote} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
       </Sheet>
     );
 
   return (
     <Sheet open={open} onClose={close} title="推奨と作例" aside={link}>
-      {(entry?.name || other || canRefresh) && (
+      {(entry?.name || name || canRefresh) && (
         <div className="mb-3 flex items-center gap-3">
           <p className="min-w-0 flex-1 truncate text-xs text-muted">
-            {entry?.name ?? other}
+            {entry?.name ?? name}
             {entry && <span className="ml-1.5">· {new Date(entry.fetchedAt).toLocaleDateString()} 取得</span>}
           </p>
           {canRefresh && (
@@ -84,6 +87,10 @@ export function RecommendSheet({
 
       {rec && (
         <dl className="divide-y divide-line rounded-2xl border border-line bg-surface text-sm">
+          <Row label="重み">{rec.weight ? formatRange(rec.weight) : null}</Row>
+          <Row label="トリガー" mono>
+            {rec.triggers?.length ? rec.triggers.join(", ") : null}
+          </Row>
           <Row label="Steps">{formatRange(rec.steps)}</Row>
           <Row label="CFG">{formatRange(rec.cfg)}</Row>
           <Row label="Sampler">{rec.samplers.join(" / ") || null}</Row>
@@ -172,7 +179,7 @@ function Row({ label, mono = false, children }: { label: string; mono?: boolean;
   );
 }
 
-function SampleDetail({ sample, v, other, meta, onBack, onUse }: { sample: Sample; v: number; other?: string; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+function SampleDetail({ sample, v, useNote, meta, onBack, onUse }: { sample: Sample; v: number; useNote?: string; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   return (
     <div>
       <button onClick={onBack} className="mb-3 text-xs text-accent">
@@ -183,14 +190,14 @@ function SampleDetail({ sample, v, other, meta, onBack, onUse }: { sample: Sampl
       {sample.noInfo ? (
         <p className="mt-3 rounded-lg bg-surface2 px-3 py-2 text-xs leading-relaxed">この作例には生成情報 (プロンプトや設定) が付いていないので、見るだけです</p>
       ) : (
-        <SampleInfo sample={sample} other={other} meta={meta} onUse={onUse} />
+        <SampleInfo sample={sample} useNote={useNote} meta={meta} onUse={onUse} />
       )}
     </div>
   );
 }
 
 /** 作例の生成情報と、生成画面に入れるボタン */
-function SampleInfo({ sample, other, meta, onUse }: { sample: Sample; other?: string; meta: Meta | null; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+function SampleInfo({ sample, useNote, meta, onUse }: { sample: Sample; useNote?: string; meta: Meta | null; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   const params = [
     sample.width && `${sample.width}×${sample.height}`,
     sample.steps !== null && `${sample.steps}st`,
@@ -228,7 +235,7 @@ function SampleInfo({ sample, other, meta, onUse }: { sample: Sample; other?: st
       </div>
       <p className="mt-2 text-[11px] text-muted">
         いまの Prompt / Negative を上書きします (Seed は変えません)
-        {other && "。Checkpoint もこのモデルに切り替えます"}
+        {useNote && `。${useNote}`}
       </p>
     </>
   );

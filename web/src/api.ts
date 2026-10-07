@@ -100,6 +100,10 @@ export interface Recommendation {
   quality: string | null;
   negative: string | null;
   notes: string[];
+  /** LoRA の重み (Checkpoint では null) */
+  weight: Range | null;
+  /** LoRA のトリガーワード */
+  triggers: string[];
 }
 
 /** 作者の作例 (生成情報のあるもの) */
@@ -125,6 +129,8 @@ export interface Sample {
   /** 必ず取る投稿者 (config の pinnedCivitaiUsers) の投稿 */
   pinned?: true;
 }
+
+export type ModelKind = "checkpoint" | "lora";
 
 export interface RecommendView {
   /** pending: 取得待ち / none: Civitai に無い / gone: Civitai から消えている / no-llm: Groq のキーが無いので作例だけ */
@@ -287,8 +293,9 @@ export const api = {
   setModelSettings: (id: string, patch: { params?: null; modules?: string[] | null }) =>
     request<Prefs>("/api/prefs/model", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ id, ...patch }) }),
   modules: () => request<{ modules: ForgeModule[] }>("/api/modules"),
-  recommend: (id: string) => request<RecommendView>(`/api/recommend?id=${encodeURIComponent(id)}`),
-  refreshRecommend: (id: string) => post<RecommendView>("/api/recommend/refresh", { id }),
+  /** LoRA は開いたときに取りにいく */
+  recommend: (id: string, kind: ModelKind = "checkpoint") => request<RecommendView>(`/api/recommend?kind=${kind}&id=${encodeURIComponent(id)}`),
+  refreshRecommend: (id: string, kind: ModelKind = "checkpoint") => post<RecommendView>("/api/recommend/refresh", { id, kind }),
   /** 付随ファイルごとゴミ箱フォルダの models/ へ移す */
   deleteModel: (kind: "checkpoint" | "lora", id: string) => post<{ files: number }>("/api/models/delete", { kind, id }),
   /** タグの付いた画像のうち、そのモデルで生成された枚数 */
