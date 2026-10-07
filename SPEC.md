@@ -133,7 +133,8 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - Civitai から消えたモデル (404) は「消えています」と出し、取り直さない
   - Civitai API の `/api/v1/model-versions/{id}` (バージョンの説明と作者の作例 最大 10 枚) と `/api/v1/models/{id}` (モデルの説明) を読む
   - 作例は `/api/v1/images?modelVersionId={id}&withMeta=true&nsfw=X&sort=Most Reactions` も読む (`withMeta=true` が無いと生成情報が返らず、`nsfw=X` が無いと全年齢のものしか返らない)。作者の作例に生成情報が無ければここから補い、生成情報のある作例が 10 枚に満たなければ、ほかの人の投稿から生成情報のあるものを足す。落ちていたら足さない
-  - 作例の集め方を変えたら版 (`samplesRev`) を上げる。古い版で取ったモデルは、推奨はそのままで作例だけ集め直す
+  - `pinnedCivitaiUsers` の投稿者の投稿は、生成情報の有無やほかの作例の数にかかわらず必ず取り (`username=` で絞って最大 20 枚)、作例の先頭に出す。どのモデルにも同じプロンプトで比較画像を上げてくれる人を入れておく
+  - 作例の集め方を変えたら版 (`samplesKey`) を上げる。版か `pinnedCivitaiUsers` が変わると、取ってあるモデルは推奨はそのままで作例だけ集め直す
   - 説明文 (HTML をテキストにして 12,000 字まで) と作例の設定の集計を Groq (`openai/gpt-oss-120b`、JSON モード) に渡して、推奨設定の JSON にしてもらう。Sampler / Scheduler は Forge の名前の一覧から選ばせる (無ければ原文のまま)
   - 結果は `data/recommended.json` に VersionId をキーにして保存し、LLM は最初の 1 回だけ呼ぶ。失敗したら 1 時間後に取り直す。シートの「再取得」で手で取り直せる (取得日も出す)
   - 作例の画像も `data/recommend-images/{VersionId}/` に webp で保存する (長辺 1024 と、一覧用の幅 450)。保存できなかった画像は Civitai から直接読む
@@ -145,7 +146,7 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - Prompt / Negative と Params の各項目 (サイズ・Steps・CFG・Sampler・Scheduler) のラベルに (i) を出し、押すとそのモデルの推奨値を出す。推奨が無い項目には (i) を出さない。範囲を外れても警告はしない
   - プロンプト欄で `/quality` と打つとクオリティタグを、`/negative` と打つと推奨ネガティブを補完の候補に出す (まとめて 1 つと、1 タグずつ)
   - Checkpoint の下の「推奨と作例」でシートを開く: 推奨の一覧・そのほかの注意・Civitai へのリンク・作例
-- 作例: 作者の作例と、足りないときのほかの人の投稿を 2 列で並べる (画像は BFF に保存したもの)。生成情報の無い作者の作例は「生成情報なし」と付けて見るだけにする。ほかの人の投稿には @投稿者 を付ける。R18 (nsfwLevel 4 以上) はぼかし、「R18 を表示」で外す (端末ごとに覚える)
+- 作例: 作者の作例と、足りないときのほかの人の投稿を 2 列で並べる (画像は BFF に保存したもの)。生成情報の無い作者の作例は「生成情報なし」と付けて見るだけにする。ほかの人の投稿には @投稿者 を付ける (必ず取る投稿者はアクセント色)。R18 (nsfwLevel 4 以上) はぼかし、「R18 を表示」で外す (端末ごとに覚える)
   - タップで大きく出し、プロンプトと設定を見られる。「プロンプトを使う」で Prompt / Negative を上書き、「設定も使う」でサイズ・Steps・CFG・Sampler・Scheduler も上書きする (Seed は変えない)。いまのプロンプトが空でなければ確認してから
   - Sampler は Forge の名前に合わせる (`DPM++ 2M Karras` のような古い書き方は Sampler と Scheduler に分ける)。合わないものは変えずに一言出す
 
@@ -268,6 +269,7 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - `launcherUrl` / `launcherServiceId`: Forge の起動と診断に使う LocalLauncher (既定 `http://127.0.0.1:8765` / `sd-forge-neo`)
   - 環境変数 `SD_RUIZ_PORT` でポートだけ差し替えられる (本番を動かしたまま別ポートで試すとき用)
   - `groqApiKey` / `groqModel`: 推奨設定の抽出に使う Groq (キーは環境変数 `GROQ_API_KEY` でもよい。モデルの既定は `openai/gpt-oss-120b`)
+  - `pinnedCivitaiUsers`: 作例で必ず取って先頭に出す Civitai の投稿者 (既定 `["Lizardon1025"]`)
 - 配信は `@fastify/compress` で圧縮する (Tailscale 越しのスマホ向け)
 
 ## 5. 未決事項

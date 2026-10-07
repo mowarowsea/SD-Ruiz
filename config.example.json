@@ -8,5 +8,6 @@
   "launcherUrl": "http://127.0.0.1:8765",
   "launcherServiceId": "sd-forge-neo",
   "groqApiKey": null,
-  "groqModel": "openai/gpt-oss-120b"
+  "groqModel": "openai/gpt-oss-120b",
+  "pinnedCivitaiUsers": ["Lizardon1025"]
 }

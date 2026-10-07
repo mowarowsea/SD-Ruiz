@@ -122,6 +122,8 @@ export interface Sample {
   noInfo?: true;
   /** ほかの人の投稿なら投稿者 */
   by?: string;
+  /** 必ず取る投稿者 (config の pinnedCivitaiUsers) の投稿 */
+  pinned?: true;
 }
 
 export interface RecommendView {

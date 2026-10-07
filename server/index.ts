@@ -23,7 +23,7 @@ const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
 const jobs = new JobManager(forge);
 const prefs = new PrefsStore();
-const recommend = new RecommendStore({ apiKey: cfg.groqApiKey, model: cfg.groqModel });
+const recommend = new RecommendStore({ apiKey: cfg.groqApiKey, model: cfg.groqModel }, cfg.pinnedCivitaiUsers);
 const gallery = new Gallery(cfg.forgeUrl, {
   gridFolders: cfg.gridFolders,
   imageFolders: cfg.imageFolders,

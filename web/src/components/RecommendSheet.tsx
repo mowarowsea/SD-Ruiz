@@ -126,7 +126,9 @@ export function RecommendSheet({
                 <img src={sampleImage(s, "thumb", entry?.imagesTriedAt)} alt="" loading="lazy" className={`size-full object-cover ${isR18(s) && !opts.r18 ? "scale-110 blur-xl" : ""}`} />
                 {isR18(s) && !opts.r18 && <span className="absolute inset-0 grid place-items-center text-xs text-white/80">R18</span>}
                 {(s.noInfo || s.by) && (
-                  <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white/90">{s.noInfo ? "生成情報なし" : `@${s.by}`}</span>
+                  <span className={`absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md px-1.5 py-0.5 text-[10px] ${s.pinned ? "bg-accent text-accent-ink" : "bg-black/60 text-white/90"}`}>
+                    {[s.by && `@${s.by}`, s.noInfo && "生成情報なし"].filter(Boolean).join(" · ")}
+                  </span>
                 )}
               </button>
             ))}

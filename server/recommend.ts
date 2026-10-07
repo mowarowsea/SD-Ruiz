@@ -54,6 +54,8 @@ export interface Sample {
   noInfo?: true;
   /** ほかの人の投稿なら投稿者 (作者の作例には無い) */
   by?: string;
+  /** 必ず取る投稿者 (pinnedCivitaiUsers) の投稿 */
+  pinned?: true;
 }
 
 export interface Entry {
@@ -68,8 +70,8 @@ export interface Entry {
   samples: Sample[];
   /** 作例の画像を保存しようとした日時 (古い Entry には無い) */
   imagesTriedAt?: number;
-  /** 作例の集め方の版 (samplesRev より古ければ作例だけ集め直す) */
-  samplesRev?: number;
+  /** 作例の集め方 (samplesKey と違えば作例だけ集め直す) */
+  samplesKey?: string;
 }
 
 /** Forge の選択肢 (LLM に名前を合わせてもらう) */
@@ -175,24 +177,41 @@ function toSample(img: Record<string, any>): Sample | null {
   };
 }
 
-/** 作例の集め方の版。上げると、取ってあるモデルの作例を集め直す (推奨はそのまま) */
-const samplesRev = 2;
+/** 作例の集め方。版を上げるか必ず取る投稿者を変えると、取ってあるモデルの作例を集め直す (推奨はそのまま) */
+const samplesKey = (pinnedUsers: string[]) => `3:${pinnedUsers.join(",")}`;
 /** 生成情報のある作例がこれより少なければ、ほかの人の投稿から足す */
 const wantSamples = 10;
 
 const imageId = (url: string) => url.match(/\/(\d+)\.\w+$/)?.[1] ?? url;
 
-/**
- * 作例を集める。作者の作例 (バージョンに付いている画像) は生成情報が無くても入れる。
- * 生成情報のあるものが足りなければ、ほかの人の投稿 (反応の多い順) から足す。
- * /api/v1/images は withMeta=true が無いと生成情報を返さない。nsfw=X が無いと全年齢のものしか返さない。落ちていたら足さない
- */
-async function collectSamples(versionId: number, versionImages: Record<string, any>[]): Promise<Sample[]> {
-  let posts: Record<string, any>[] = [];
+/** /api/v1/images (withMeta=true が無いと生成情報を返さない。nsfw=X が無いと全年齢のものしか返さない)。落ちていたら空 */
+async function civitaiPosts(versionId: number, query: string) {
   try {
-    posts = ((await civitai(`https://civitai.com/api/v1/images?modelVersionId=${versionId}&limit=50&sort=Most%20Reactions&withMeta=true&nsfw=X`)).items ?? []) as Record<string, any>[];
-  } catch {}
-  const postById = new Map(posts.map((p) => [imageId(String(p.url)), p]));
+    return ((await civitai(`https://civitai.com/api/v1/images?modelVersionId=${versionId}&withMeta=true&nsfw=X&${query}`)).items ?? []) as Record<string, any>[];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * 作例を集める。
+ * 1. 必ず取る投稿者の投稿 (生成情報が無くても、ほかが足りていても)
+ * 2. 作者の作例 (バージョンに付いている画像)。生成情報が無くても入れる
+ * 3. 生成情報のあるものが足りなければ、ほかの人の投稿 (反応の多い順) から足す
+ */
+async function collectSamples(versionId: number, versionImages: Record<string, any>[], pinnedUsers: string[]): Promise<Sample[]> {
+  const posts = await civitaiPosts(versionId, "limit=50&sort=Most%20Reactions");
+  const pinnedPosts: Record<string, any>[] = [];
+  for (const user of pinnedUsers) pinnedPosts.push(...(await civitaiPosts(versionId, `limit=20&username=${encodeURIComponent(user)}`)));
+  const postById = new Map([...posts, ...pinnedPosts].map((p) => [imageId(String(p.url)), p]));
+  const seen = new Set<string>();
+  const pinned: Sample[] = [];
+  for (const p of pinnedPosts) {
+    const s = toSample(p);
+    if (!s || seen.has(imageId(s.url))) continue;
+    seen.add(imageId(s.url));
+    pinned.push({ ...s, by: typeof p.username === "string" ? p.username : "?", pinned: true });
+  }
   // 作者の作例でも、バージョンの API には生成情報が無く、画像の API にはあることがある
   const author = versionImages
     .map((img) => {
@@ -200,17 +219,18 @@ async function collectSamples(versionId: number, versionImages: Record<string, a
       const post = postById.get(imageId(String(img.url)));
       return s?.noInfo && post ? (toSample({ ...post, url: img.url }) ?? s) : s;
     })
-    .filter((s): s is Sample => !!s);
-  const seen = new Set(author.map((s) => imageId(s.url)));
+    .filter((s): s is Sample => !!s && !seen.has(imageId(s.url)));
+  for (const s of author) seen.add(imageId(s.url));
   const others: Sample[] = [];
+  const withInfo = [...pinned, ...author].filter((s) => !s.noInfo).length;
   for (const p of posts) {
-    if (author.filter((s) => !s.noInfo).length + others.length >= wantSamples) break;
+    if (withInfo + others.length >= wantSamples) break;
     const s = toSample(p);
     if (!s || s.noInfo || seen.has(imageId(s.url))) continue;
     seen.add(imageId(s.url));
     others.push({ ...s, by: typeof p.username === "string" ? p.username : "?" });
   }
-  return [...author, ...others];
+  return [...pinned, ...author, ...others];
 }
 
 /** 作例の設定を LLM に渡す形にまとめる (多いものから) */
@@ -404,7 +424,10 @@ export class RecommendStore {
   private current: Job | null = null;
   private names: ForgeNames = { samplers: [], schedulers: [] };
 
-  constructor(private groq: { apiKey: string | null; model: string }) {}
+  constructor(
+    private groq: { apiKey: string | null; model: string },
+    private pinnedUsers: string[],
+  ) {}
 
   /**
    * このモデルの推奨と作例。status は Entry の status か、
@@ -458,7 +481,7 @@ export class RecommendStore {
       const stale = !e || (e.status === "error" && Date.now() - e.fetchedAt > retryAfterError) || (e.status === "no-llm" && this.groq.apiKey);
       if (stale) this.queue.push({ kind: "fetch", ids });
       // 作例の集め方を変える前に取ったものは、作例だけ集め直す (画像の保存も)
-      else if ((e.samplesRev ?? 0) < samplesRev && e.status !== "gone") this.queue.push({ kind: "samples", versionId: ids.versionId });
+      else if (e.samplesKey !== samplesKey(this.pinnedUsers) && e.status !== "gone") this.queue.push({ kind: "samples", versionId: ids.versionId });
     }
     this.queue.push(...hashJobs);
     void this.drain();
@@ -486,10 +509,10 @@ export class RecommendStore {
           if (e) {
             try {
               const version = await civitai(`https://civitai.com/api/v1/model-versions/${job.versionId}`);
-              const samples = await saveSampleImages(job.versionId, await collectSamples(job.versionId, version.images ?? []));
+              const samples = await saveSampleImages(job.versionId, await collectSamples(job.versionId, version.images ?? [], this.pinnedUsers));
               // 集めている間に取り直されていたら、そちらを残す
               if (this.entries[job.versionId] === e) {
-                this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now(), samplesRev };
+                this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now(), samplesKey: samplesKey(this.pinnedUsers) };
                 this.save();
               }
             } catch {
@@ -539,8 +562,8 @@ export class RecommendStore {
       const version = await civitai(`https://civitai.com/api/v1/model-versions/${versionId}`);
       const model = await civitai(`https://civitai.com/api/v1/models/${modelId}`);
       name = `${model.name ?? version.model?.name ?? ""} ${version.name ?? ""}`.trim();
-      samples = await saveSampleImages(versionId, await collectSamples(versionId, version.images ?? []));
-      const done = { ...base, name, samples, imagesTriedAt: Date.now(), samplesRev };
+      samples = await saveSampleImages(versionId, await collectSamples(versionId, version.images ?? [], this.pinnedUsers));
+      const done = { ...base, name, samples, imagesTriedAt: Date.now(), samplesKey: samplesKey(this.pinnedUsers) };
       if (!this.groq.apiKey) return { ...done, status: "no-llm", error: null, rec: null };
       const description = [htmlToText(String(model.description ?? "")), htmlToText(String(version.description ?? ""))].filter(Boolean).join("\n\n--- このバージョンの説明 ---\n");
       const rec = await askGroq(this.groq.apiKey, this.groq.model, buildPrompt(name, description, samples, this.names));
@@ -548,7 +571,7 @@ export class RecommendStore {
     } catch (e) {
       // 消されたモデルは取り直さない。取れなかったときは、前に取ってあった推奨と作例を残す
       const gone = e instanceof CivitaiError && e.status === 404;
-      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt, samplesRev: samples ? samplesRev : prev?.samplesRev };
+      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt, samplesKey: samples ? samplesKey(this.pinnedUsers) : prev?.samplesKey };
     }
   }
 

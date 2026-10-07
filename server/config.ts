@@ -26,6 +26,8 @@ export interface Config {
   /** モデルの推奨設定を説明文から抜き出すのに使う Groq の API キー (無ければ環境変数 GROQ_API_KEY。どちらも無ければ作例だけ取る) */
   groqApiKey: string | null;
   groqModel: string;
+  /** 作例で必ず取る Civitai の投稿者 (どのモデルにも同じプロンプトで比較画像を上げてくれる人など)。作例の先頭に出す */
+  pinnedCivitaiUsers: string[];
 }
 
 const defaults: Config = {
@@ -43,6 +45,7 @@ const defaults: Config = {
   launcherServiceId: "sd-forge-neo",
   groqApiKey: null,
   groqModel: "openai/gpt-oss-120b",
+  pinnedCivitaiUsers: ["Lizardon1025"],
 };
 
 // config.json (git 管理外) があれば defaults を上書きする
