@@ -137,6 +137,8 @@ export interface RecommendView {
   status: "ok" | "no-llm" | "gone" | "error" | "pending" | "none";
   url: string | null;
   entry: { name: string; fetchedAt: number; error: string | null; rec: Recommendation | null; samples: Sample[]; imagesTriedAt?: number } | null;
+  /** Entry の無いときのエラー (ハッシュから Civitai に聞けなかったなど) */
+  error?: string | null;
 }
 
 export interface TagHit {

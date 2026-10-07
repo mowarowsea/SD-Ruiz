@@ -107,14 +107,14 @@ export function ParamsAccordion({
             <NumberField value={value.cfg} onChange={(cfg) => onChange({ cfg })} min={0} max={30} integer={false} ariaLabel="CFG" />
           </Field>
           <Field label="Sampler" tip={samplerTip}>
-            <select className="field w-full text-sm" value={value.sampler} onChange={(e) => onChange({ sampler: e.target.value })}>
+            <select className="field w-full text-sm" aria-label="Sampler" value={value.sampler} onChange={(e) => onChange({ sampler: e.target.value })}>
               {(meta?.samplers ?? [value.sampler]).map((s) => (
                 <option key={s}>{s}</option>
               ))}
             </select>
           </Field>
           <Field label="Scheduler" tip={schedulerTip}>
-            <select className="field w-full text-sm" value={value.scheduler} onChange={(e) => onChange({ scheduler: e.target.value })}>
+            <select className="field w-full text-sm" aria-label="Scheduler" value={value.scheduler} onChange={(e) => onChange({ scheduler: e.target.value })}>
               {(meta?.schedulers ?? [{ name: value.scheduler, label: schedulerLabel }]).map((s) => (
                 <option key={s.name} value={s.name}>
                   {s.label}
@@ -160,17 +160,21 @@ function SeedMark({ seed }: { seed: number }) {
   );
 }
 
+/**
+ * 見出しの行 (推奨の (i) と ⇄ などのボタン) は label で包まない。
+ * label の中にボタンがあると、そのボタンが label の対象になり、見出しの文字や (i) の吹き出しの文字を押しただけでボタンが押されてしまうため
+ */
 function Field({ label, action, tip, children }: { label: string; action?: ReactNode; tip?: ReactNode; children: ReactNode }) {
   return (
-    <label className="block min-w-0">
-      <span className="mb-1 flex justify-between text-[11px] text-muted">
+    <div className="min-w-0">
+      <div className="mb-1 flex justify-between text-[11px] text-muted">
         <span>
           {label}
           {tip}
         </span>
-        {action && <span onClick={(e) => e.preventDefault()}>{action}</span>}
-      </span>
+        {action}
+      </div>
       {children}
-    </label>
+    </div>
   );
 }

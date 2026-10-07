@@ -13,8 +13,8 @@
 // 「1 つ前の grid から、この grid までの間に保存された単体画像」とみなす (Forge は単体画像を書いたあとに grid を書く)。
 // バッチ 1 の生成 (grid なし) を取り違えないよう、grid との時間差と Seed でも絞る。
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { open, readdir, stat } from "node:fs/promises";
 import { basename, dirname, join, relative } from "node:path";
 import { Worker } from "node:worker_threads";
 import { ForgeError } from "./forge.js";
@@ -69,11 +69,11 @@ function freePath(dir: string, name: string) {
 }
 
 /** PNG の生成情報 (tEXt / iTXt の parameters)。先頭の方だけ読む */
-function pngParameters(path: string): string | null {
-  const fd = openSync(path, "r");
+async function pngParameters(path: string): Promise<string | null> {
+  const fh = await open(path, "r");
   try {
     const buf = Buffer.alloc(512 * 1024);
-    const n = readSync(fd, buf, 0, buf.length, 0);
+    const { bytesRead: n } = await fh.read(buf, 0, buf.length, 0);
     let p = 8;
     while (p + 8 <= n) {
       const len = buf.readUInt32BE(p);
@@ -95,8 +95,22 @@ function pngParameters(path: string): string | null {
     }
     return null;
   } finally {
-    closeSync(fd);
+    await fh.close();
   }
+}
+
+/** items を同時に limit 個までの fn で処理する (何千ものファイルを一度に開かないよう) */
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
 }
 
 /**
@@ -337,16 +351,22 @@ export class Gallery {
           map.set(k, [...(map.get(k) ?? []), byId.get(r.id)!]);
         }
         this.tagCache = { at: Date.now(), map, all };
-        for (const p of this.tagPatches) this.patchTags(...p);
+        // 当て直しは applyPatch で (patchTags だと、読み直し中なので tagPatches に積み直して終わらなくなる)
+        for (const p of this.tagPatches) this.applyPatch(...p);
+        this.tagPatches = [];
       } finally {
         this.tagLoad = null;
       }
     })());
   }
 
-  /** IIB に書き込んだ付け外しを手元の一覧にも反映する */
+  /** IIB に書き込んだ付け外しを手元の一覧にも反映する (読み直し中なら、読み終えたあとにも当て直す) */
   private patchTags(paths: string[], tagId: number, on: boolean) {
     if (this.tagLoad) this.tagPatches.push([paths, tagId, on]);
+    this.applyPatch(paths, tagId, on);
+  }
+
+  private applyPatch(paths: string[], tagId: number, on: boolean) {
     const c = this.tagCache;
     const tag = c?.all.find((t) => t.id === tagId);
     if (!c || !tag) return;
@@ -431,7 +451,7 @@ export class Gallery {
     if (opts.q) {
       const q = opts.q.toLowerCase();
       const hits = await this.search(opts.kind, opts.q);
-      const matched = await Promise.all(files.map(async (f) => (f.saved ? (await this.savedText(f)).toLowerCase().includes(q) : hits.has(key(f.path)))));
+      const matched = await mapLimit(files, 16, async (f) => (f.saved ? (await this.savedText(f)).toLowerCase().includes(q) : hits.has(key(f.path))));
       files = files.filter((_, i) => matched[i]);
     }
     const page = files.slice(opts.offset, opts.offset + opts.limit);
@@ -452,7 +472,7 @@ export class Gallery {
     if (c?.mtime === f.mtime) return c.text;
     let text: string | null = null;
     try {
-      if (/\.png$/i.test(f.name)) text = pngParameters(f.path);
+      if (/\.png$/i.test(f.name)) text = await pngParameters(f.path);
     } catch {
       /* 読めなければ IIB に頼る */
     }
@@ -701,7 +721,7 @@ export class Gallery {
   async countTaggedUsing(used: (geninfo: string) => boolean) {
     const [s, out] = await Promise.all([this.savedIndex(), this.files("image"), this.ensureTags()]);
     const files = [...s.images, ...out.filter((f) => this.tagsOf(f.path).length > 0)];
-    const hits = await Promise.all(files.map(async (f) => used(await this.savedText(f))));
+    const hits = await mapLimit(files, 16, async (f) => used(await this.savedText(f)));
     return hits.filter(Boolean).length;
   }
 

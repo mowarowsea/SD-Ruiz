@@ -26,8 +26,8 @@ export function RecommendSheet({
   view: RecommendView | null;
   meta: Meta | null;
   onRefresh: () => Promise<void>;
-  /** 作例を使う。skipped は Forge に合わずに入れなかった項目 */
-  onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void;
+  /** 作例を使う。skipped は Forge に合わずに入れなかった項目。入れたら true (上書きの確認でやめたら false で、シートは閉じない) */
+  onUse: (patch: Partial<GenerateParams>, skipped: string[]) => boolean;
   /** Civitai の名前が分かるまで出すモデルの名前 (一覧から開いたとき) */
   name?: string;
   /** 作例を使うときに、上書きのほかにすること (「Checkpoint もこのモデルに切り替えます」など) */
@@ -64,7 +64,7 @@ export function RecommendSheet({
   if (selected)
     return (
       <Sheet open={open} onClose={close} title="作例" aside={link}>
-        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} useNote={useNote} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
+        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} useNote={useNote} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => onUse(patch, skipped) && close()} />
       </Sheet>
     );
 
@@ -163,7 +163,7 @@ function StatusNote({ view }: { view: RecommendView | null }) {
     case "no-llm":
       return note("Groq の API キーが無いので、推奨設定は読み取っていません (作例だけ)。環境変数 GROQ_API_KEY か config.json の groqApiKey に入れてください");
     case "error":
-      return note(`取得できませんでした: ${view.entry?.error ?? ""} (1 時間後に自動で取り直します。前に取ったものがあればそれを出しています)`, true);
+      return note(`取得できませんでした: ${view.entry?.error ?? view.error ?? ""} (1 時間後に自動で取り直します。前に取ったものがあればそれを出しています)`, true);
     default:
       return view.entry?.rec && Object.values(view.entry.rec).every((v) => v === null || (Array.isArray(v) && !v.length)) ? note("説明文と作例に推奨設定が見つかりませんでした") : null;
   }

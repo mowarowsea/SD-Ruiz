@@ -72,12 +72,14 @@ export function GeneratePage({
   const browse = useRecommend(browsing?.id ?? "", browsing?.kind);
   // 作例を使って閉じたときは、一覧に戻らない
   const usedSample = useRef(false);
+  /** 作例を入れる。上書きの確認でやめたら false */
   const applySample = (p: Partial<GenerateParams>, skipped: string[], checkpoint?: string) => {
-    if ((form.prompt.trim() || form.negative.trim()) && !confirm("いまの Prompt / Negative を作例のもので上書きします")) return;
+    if ((form.prompt.trim() || form.negative.trim()) && !confirm("いまの Prompt / Negative を作例のもので上書きします")) return false;
     // 別のモデルの作例なら、そのモデルに切り替えて (前回の設定に戻して) から入れる
     if (checkpoint && checkpoint !== form.checkpoint) selectCheckpoint(checkpoint);
     patch(p);
     setRestored(skipped.length ? `作例を入れました (そのまま使えないので変えなかった: ${skipped.join("、")})` : "作例を入れました");
+    return true;
   };
 
   // 使っている LoRA がこのモデルに合うか (ベースモデルの構造が違うと効かない)。どちらかが分からなければ合うことにする
@@ -114,14 +116,22 @@ export function GeneratePage({
   const running = job?.status === "running" || submitting;
   const canGenerate = !!forge?.online && !!form.checkpoint && !running;
 
-  // 中断は押してから実際に止まるまで間があるので、押したら「中断中…」にして押せたことが分かるようにする。生成が終わったら戻す
-  const [interrupting, setInterrupting] = useState(false);
+  // 中断は押してから実際に止まるまで間があるので、押したら「中断中…」にして押せたことが分かるようにする。
+  // 押したジョブで覚える (次の生成には持ち越さない)。Forge が中断を取りこぼすことがあるので、5 秒たっても止まらなければもう一度押せるようにする
+  const [interrupted, setInterrupted] = useState<{ id: string; retry: boolean } | null>(null);
+  const interrupting = job?.status === "running" && interrupted?.id === job.id;
+  const waitingStop = interrupting && !interrupted.retry;
   useEffect(() => {
-    if (!running) setInterrupting(false);
-  }, [running]);
+    if (!interrupted || interrupted.retry) return;
+    const t = setTimeout(() => setInterrupted((x) => x && { ...x, retry: true }), 5000);
+    return () => clearTimeout(t);
+  }, [interrupted]);
+  // 送信中 (まだ Forge に届いていない) は中断できないので押せなくする (押しても何も起きないまま「中断中…」になるため)
+  const canInterrupt = job?.status === "running" && !waitingStop;
   const interrupt = () => {
-    setInterrupting(true);
-    api.interrupt().catch(() => setInterrupting(false));
+    if (job?.status !== "running") return;
+    setInterrupted({ id: job.id, retry: false });
+    api.interrupt().catch(() => setInterrupted(null));
   };
 
   const generate = async () => {
@@ -139,11 +149,12 @@ export function GeneratePage({
   };
 
   // PC 向けに Ctrl+Enter (Mac は ⌘+Enter) でも生成する。プロンプト欄 (CodeMirror の Mod-Enter は空行の挿入) より先に取るので capture で聞く。
-  // シートを開いている間はしない
+  // シートを開いている間はしない (一覧から開いた推奨と作例のシートは sheet を閉じて開くので、browsing も見る)
   const onShortcut = useRef<() => void>(() => {});
   onShortcut.current = () => canGenerate && void generate();
+  const sheetOpen = !!sheet || !!browsing;
   useEffect(() => {
-    if (!active || sheet) return;
+    if (!active || sheetOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Enter" || !(e.ctrlKey || e.metaKey) || e.isComposing) return;
       e.preventDefault();
@@ -152,7 +163,7 @@ export function GeneratePage({
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [active, sheet]);
+  }, [active, sheetOpen]);
 
   // 進捗は 1 回の生成の中では戻さない (終わり際に Forge が 0 を返すとバーが右から左へ縮んで、エラーで戻ったように見えるので)。
   // 始まった直後は前の生成の値が残っていることがあるので、ステップが進み始めるまでは使わない
@@ -221,8 +232,8 @@ export function GeneratePage({
                 <div className="absolute inset-y-0 left-0 bg-accent/60 transition-[width] duration-500" style={{ width: `${Math.round(ratio * 100)}%` }} />
                 <span className="relative">{interrupting ? "中断しています…" : job?.status === "running" ? runningLabel(progress, stepped) : "送信中…"}</span>
               </div>
-              <button onClick={interrupt} disabled={interrupting} className={`rounded-2xl border border-line bg-surface px-4 text-sm text-muted ${PRESS} disabled:opacity-50`}>
-                {interrupting ? "中断中…" : "中断"}
+              <button onClick={interrupt} disabled={!canInterrupt} className={`rounded-2xl border border-line bg-surface px-4 text-sm text-muted ${PRESS} disabled:opacity-50`}>
+                {waitingStop ? "中断中…" : "中断"}
               </button>
             </div>
           ) : (
@@ -250,7 +261,7 @@ export function GeneratePage({
           }}
           onRefresh={onReloadCheckpoints}
           onRecommend={(title) => {
-            if (title === form.checkpoint) return setSheet("recommend");
+            // いまのモデルでも一覧から開いたものとして開く (閉じたら一覧に戻る)
             setBrowsing({ kind: "checkpoint", id: title });
             setSheet(null);
           }}
@@ -268,16 +279,22 @@ export function GeneratePage({
         meta={meta}
         onRefresh={browse.refresh}
         onUse={(p, skipped) => {
-          if (!browsing) return;
-          usedSample.current = true;
-          if (browsing.kind === "checkpoint") return applySample(p, skipped, browsing.id);
-          // LoRA の作例: 作例のプロンプトの <lora:> は作者のファイル名なので、この LoRA が無ければ足す (重みは推奨があればそれ)
-          const has = p.prompt !== undefined && findLoras(p.prompt).some((u) => u.name === browsing.id);
-          const weight = browse.view?.entry?.rec?.weight;
-          applySample(p.prompt === undefined || has ? p : { ...p, prompt: addLora(p.prompt, browsing.id, weight?.best ?? weight?.max ?? 1) }, skipped);
+          if (!browsing) return false;
+          let applied: boolean;
+          if (browsing.kind === "checkpoint") applied = applySample(p, skipped, browsing.id);
+          else {
+            // LoRA の作例: 作例のプロンプトの <lora:> は作者のファイル名なので、この LoRA が無ければ足す (重みは推奨があればそれ)
+            const has = p.prompt !== undefined && findLoras(p.prompt).some((u) => u.name === browsing.id);
+            const weight = browse.view?.entry?.rec?.weight;
+            applied = applySample(p.prompt === undefined || has ? p : { ...p, prompt: addLora(p.prompt, browsing.id, weight?.best ?? weight?.max ?? 1) }, skipped);
+          }
+          usedSample.current = applied;
+          return applied;
         }}
         name={browsing ? (browsing.kind === "checkpoint" ? modelLabel(browsing.id) : browsing.id) : undefined}
-        useNote={browsing?.kind === "checkpoint" ? "Checkpoint もこのモデルに切り替えます" : browsing ? "この LoRA がプロンプトに無ければ末尾に足します" : undefined}
+        useNote={
+          browsing?.kind === "lora" ? "この LoRA がプロンプトに無ければ末尾に足します" : browsing && browsing.id !== form.checkpoint ? "Checkpoint もこのモデルに切り替えます" : undefined
+        }
       />
       <LoraSheet
         open={sheet === "lora"}

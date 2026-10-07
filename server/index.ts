@@ -138,7 +138,8 @@ server.get("/api/meta", async () => {
 });
 
 // モデルの推奨設定と作例 (status は RecommendStore.view)
-// Checkpoint は /api/meta で裏でまとめて取る。LoRA は数が多いので、開いたときにだけ (先に) 取る
+// Checkpoint は /api/meta で裏でまとめて取る。LoRA は数が多いので、開いたときにだけ取る。
+// どちらも開いたものは取得の列の先頭に入れる (Checkpoint もまとめて積んだ分の後ろで待たないよう)
 async function modelRef(id: string, kind: string | undefined) {
   const lora = kind === "lora";
   const paths = lora ? loraPaths : checkpointPaths;
@@ -149,7 +150,7 @@ async function modelRef(id: string, kind: string | undefined) {
 
 server.get<{ Querystring: { id?: string; kind?: string } }>("/api/recommend", async (req) => {
   const ref = await modelRef(req.query.id ?? "", req.query.kind);
-  if (ref && req.query.kind === "lora") recommend.ensure([ref], null, true);
+  if (ref) recommend.ensure([ref], null, true);
   return ref ? recommend.view(ref) : { status: "none", url: null, entry: null };
 });
 
@@ -161,7 +162,7 @@ server.post<{ Body: { id?: string; kind?: string } }>("/api/recommend/refresh", 
   return recommend.view(ref);
 });
 
-// 保存した作例の画像 (取り直すと同じ名前で中身が変わるので、キャッシュは短め)
+// 保存した作例の画像 (前の作りの "{versionId}/{n}" は取り直すと同じ名前で中身が変わるので、キャッシュは短め)
 server.get<{ Querystring: { f?: string; size?: string } }>("/api/recommend/image", async (req, reply) => {
   const file = sampleImagePath(req.query.f ?? "", req.query.size === "thumb" ? "thumb" : "full");
   if (!file || !existsSync(file)) return reply.code(404).send({ error: "not found" });

@@ -2,7 +2,7 @@
 // 作例の画像も data/recommend-images/ に保存する (Civitai から消えても見られるように)
 
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -52,7 +52,7 @@ export interface Sample {
   scheduler: string | null;
   seed: number | null;
   clipSkip: number | null;
-  /** 手元に保存した画像 ("{versionId}/{n}"。保存できていなければ無い) */
+  /** 手元に保存した画像 ("{versionId}/{取った日時}/{n}"。前の作りでは "{versionId}/{n}"。保存できていなければ無い) */
   file?: string;
   /** 生成情報が無い (見るだけ) */
   noInfo?: true;
@@ -97,6 +97,8 @@ interface HashLookup {
   /** Civitai に無ければ null */
   ids: CivitaiIds | null;
   checkedAt: number;
+  /** Civitai に聞けなかった (落ちていたなど)。ids は null で、1 時間後に聞き直す (ハッシュは計算し直さない) */
+  error?: string;
 }
 
 const path = fileURLToPath(new URL("../data/recommended.json", import.meta.url));
@@ -107,6 +109,25 @@ const ua = { "user-agent": "SD-Ruiz (personal txt2img frontend)" };
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/** 読めなければ (書いている途中で止まって壊れていれば) 脇へ退けて空から始める (起動できなくならないよう) */
+function readJson<T>(file: string, empty: T): T {
+  if (!existsSync(file)) return empty;
+  try {
+    return JSON.parse(readFileSync(file, "utf8")) as T;
+  } catch (e) {
+    console.warn(`${file} を読めないので ${file}.broken に退けて空から始めます: ${(e as Error).message}`);
+    renameSync(file, `${file}.broken`);
+    return empty;
+  }
+}
+
+/** 一時ファイルに書いてから入れ替える (書いている途中で止まっても壊れないよう) */
+function writeJson(file: string, data: unknown) {
+  mkdirSync(dirname(file), { recursive: true });
+  writeFileSync(`${file}.tmp`, JSON.stringify(data, null, 2));
+  renameSync(`${file}.tmp`, file);
 }
 
 /** 説明文の HTML をテキストにする (段落と箇条書きは改行に) */
@@ -399,46 +420,73 @@ export interface ModelRef {
   civitai: CivitaiIds | null;
 }
 
-type Job = { kind: "fetch"; ids: CivitaiIds } | { kind: "hash"; file: string } | { kind: "samples"; versionId: number };
+/** fetch の keepSamples: 作例はそのままで推奨だけ取り直す (自動の取り直しで、作例の集め方が変わっていないとき) */
+type Job = { kind: "fetch"; ids: CivitaiIds; keepSamples?: boolean } | { kind: "hash"; file: string } | { kind: "samples"; versionId: number };
 
 const jobVersion = (j: Job) => (j.kind === "fetch" ? j.ids.versionId : j.kind === "samples" ? j.versionId : null);
 
 /** 保存した作例の画像 (full は長辺 1024、thumb は幅 450) のパス。名前がおかしければ null */
 export function sampleImagePath(file: string, size: "full" | "thumb") {
-  if (!/^\d+\/\d+$/.test(file)) return null;
+  if (!/^\d+\/(\d+\/)?\d+$/.test(file)) return null;
   return join(imageDir, `${file}${size === "thumb" ? "-thumb" : ""}.webp`);
 }
 
-/** 作例の画像を Civitai から落として webp で保存する。落とせなかったものは file を付けない (画面では Civitai から直接読む) */
+/**
+ * 作例の画像を Civitai から落として webp で保存する。落とせなかったものは file を付けない (画面では Civitai から直接読む)。
+ * 取るたびに別のフォルダ ({versionId}/{取った日時}/) に入れ、前の画像は Entry を保存してから pruneImages() で消す
+ * (先に入れ替えると、Entry を保存するまでの間 (と、その間に止まったらずっと) 古い作例の情報に新しい画像が並ぶため)
+ */
 async function saveSampleImages(versionId: number, samples: Sample[]): Promise<Sample[]> {
-  // 別のフォルダに落としてから入れ替える (途中で止まっても前の画像が残るように)
-  const dir = join(imageDir, String(versionId));
-  const tmp = `${dir}.new`;
-  rmSync(tmp, { recursive: true, force: true });
-  mkdirSync(tmp, { recursive: true });
+  const stamp = Date.now();
+  const dir = join(imageDir, String(versionId), String(stamp));
+  mkdirSync(dir, { recursive: true });
   const out: Sample[] = [];
   for (const [i, { file: _, ...s }] of samples.entries()) {
     try {
       const res = await fetch(s.url.replace(/\/(original=true|width=\d+)\//, "/width=1024/"), { headers: ua, signal: AbortSignal.timeout(60_000) });
       if (!res.ok) throw new Error(String(res.status));
       const buf = Buffer.from(await res.arrayBuffer());
-      const file = `${versionId}/${i}`;
-      await sharp(buf).resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).webp({ quality: 85 }).toFile(join(tmp, `${i}.webp`));
-      await sharp(buf).resize({ width: 450, withoutEnlargement: true }).webp({ quality: 80 }).toFile(join(tmp, `${i}-thumb.webp`));
-      out.push({ ...s, file });
+      await sharp(buf).resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).webp({ quality: 85 }).toFile(join(dir, `${i}.webp`));
+      await sharp(buf).resize({ width: 450, withoutEnlargement: true }).webp({ quality: 80 }).toFile(join(dir, `${i}-thumb.webp`));
+      out.push({ ...s, file: `${versionId}/${stamp}/${i}` });
     } catch {
       out.push(s);
     }
     await sleep(300);
   }
-  rmSync(dir, { recursive: true, force: true });
-  renameSync(tmp, dir);
   return out;
 }
 
+/** 保存した作例の画像のうち、いまの Entry が使っていないもの (前に取った分・途中で止まった分) を消す */
+function pruneImages(versionId: number, entry: Entry | undefined) {
+  const dir = join(imageDir, String(versionId));
+  const remove = (p: string) => {
+    try {
+      rmSync(p, { recursive: true, force: true });
+    } catch {
+      /* 開いている途中などで消せなかったものは次の機会に */
+    }
+  };
+  // 前の作りの、入れ替え用のフォルダ
+  remove(`${dir}.new`);
+  let list;
+  try {
+    list = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // まだ画像を保存していない
+  }
+  const used = new Set((entry?.samples ?? []).flatMap((s) => (s.file ? [s.file] : [])));
+  const usedDirs = new Set([...used].map((f) => f.split("/")).flatMap((p) => (p.length === 3 ? [p[1]] : [])));
+  for (const e of list) {
+    // 前の作りの画像 ("{versionId}/{n}") はフォルダの直下にある
+    const keep = e.isDirectory() ? usedDirs.has(e.name) : used.has(`${versionId}/${e.name.replace(/(-thumb)?\.webp$/, "")}`);
+    if (!keep) remove(join(dir, e.name));
+  }
+}
+
 export class RecommendStore {
-  private entries: Record<string, Entry> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
-  private hashes: Record<string, HashLookup> = existsSync(hashPath) ? JSON.parse(readFileSync(hashPath, "utf8")) : {};
+  private entries: Record<string, Entry> = readJson(path, {});
+  private hashes: Record<string, HashLookup> = readJson(hashPath, {});
   private queue: Job[] = [];
   /** いま処理しているもの */
   private current: Job | null = null;
@@ -451,16 +499,18 @@ export class RecommendStore {
 
   /**
    * このモデルの推奨と作例。status は Entry の status か、
-   * pending (取得待ち。付随ファイルの無いモデルはハッシュの計算から) / none (Civitai に無い)
+   * pending (取得待ち。付随ファイルの無いモデルはハッシュの計算から) / none (Civitai に無い) / error (ハッシュから Civitai に聞けなかった。理由は error)
    */
   view(ref: ModelRef) {
     const ids = this.idsOf(ref);
+    const h = this.hashes[ref.file];
     const url = ids && `https://civitai.com/models/${ids.modelId}?modelVersionId=${ids.versionId}`;
     const saved = ids ? (this.entries[ids.versionId] ?? null) : null;
     const entry = saved && { ...saved, rec: saved.rec && tidy(saved.rec, this.names) };
-    const pending = this.isQueued(ref) || (!ids && !this.hashes[ref.file]);
-    const status = pending ? "pending" : !ids ? "none" : (saved?.status ?? "pending");
-    return { status, url, entry };
+    const pending = this.isQueued(ref) || (!ids && !h);
+    const lookupError = !ids && h?.error ? `ハッシュから Civitai で探せませんでした (${h.error})` : null;
+    const status = pending ? "pending" : lookupError ? "error" : !ids ? "none" : (saved?.status ?? "pending");
+    return { status, url, entry, error: lookupError };
   }
 
   private idsOf(ref: ModelRef): CivitaiIds | null {
@@ -478,17 +528,23 @@ export class RecommendStore {
     }
   }
 
+  /** そのモデルのジョブか */
+  private jobFor(j: Job, ref: ModelRef, ids: CivitaiIds | null) {
+    return j.kind === "hash" ? j.file === ref.file : jobVersion(j) === ids?.versionId;
+  }
+
   private isQueued(ref: ModelRef) {
     const ids = this.idsOf(ref);
-    return [this.current, ...this.queue].some((j) => j && (j.kind === "hash" ? j.file === ref.file : jobVersion(j) === ids?.versionId));
+    return [this.current, ...this.queue].some((j) => j && this.jobFor(j, ref, ids));
   }
 
   /**
    * まだ取っていない (か、失敗してから時間が経った) モデルを取りにいく。付随ファイルの無いものはハッシュから Civitai の ID を引く。
-   * first: 開いたものを先に取る (LoRA は数が多いので、開いたときにだけ取る)
+   * first: 開いたものを先に取る (もう列にあっても先頭へ)。LoRA は数が多いので、開いたときにだけ取る
    */
   ensure(refs: ModelRef[], names: ForgeNames | null, first = false) {
     if (names) this.names = names;
+    const key = samplesKey(this.pinnedUsers);
     const jobs: Job[] = [];
     const hashJobs: Job[] = [];
     for (const ref of refs) {
@@ -496,28 +552,34 @@ export class RecommendStore {
       const ids = this.idsOf(ref);
       if (!ids) {
         const h = this.hashes[ref.file];
-        // ハッシュは重い (数 GB を読む) ので、Civitai の取得より後に回す。Civitai に無かったものは 1 週間後に引き直す
-        if (!h || !this.hashFresh(ref.file, h) || (!h.ids && Date.now() - h.checkedAt > 7 * 24 * 60 * 60_000)) hashJobs.push({ kind: "hash", file: ref.file });
+        // ハッシュは重い (数 GB を読む) ので、Civitai の取得より後に回す。
+        // Civitai に無かったものは 1 週間後、聞けなかったもの (落ちていたなど) は 1 時間後に聞き直す (中身が変わっていなければハッシュは計算し直さない)
+        const recheck = h?.error ? retryAfterError : 7 * 24 * 60 * 60_000;
+        if (!h || !this.hashFresh(ref.file, h) || (!h.ids && Date.now() - h.checkedAt > recheck)) hashJobs.push({ kind: "hash", file: ref.file });
         continue;
       }
       const e = this.entries[ids.versionId];
       // キーを後から足したら、作例だけのものも取り直す
       const stale = !e || (e.status === "error" && Date.now() - e.fetchedAt > retryAfterError) || (e.status === "no-llm" && this.groq.apiKey);
-      if (stale) jobs.push({ kind: "fetch", ids });
+      // 自動の取り直しは、作例の集め方が変わっていなければ推奨だけ (失敗のたびに作例の画像を落とし直さないよう)
+      if (stale) jobs.push({ kind: "fetch", ids, keepSamples: !!e && e.samplesKey === key });
       // 作例の集め方を変える前に取ったものは、作例だけ集め直す (画像の保存も)
-      else if (e.samplesKey !== samplesKey(this.pinnedUsers) && e.status !== "gone") jobs.push({ kind: "samples", versionId: ids.versionId });
+      else if (e.samplesKey !== key && e.status !== "gone") jobs.push({ kind: "samples", versionId: ids.versionId });
     }
-    if (first) this.queue.unshift(...jobs, ...hashJobs);
-    else this.queue.push(...jobs, ...hashJobs);
+    if (first) {
+      const opened = refs.map((r) => [r, this.idsOf(r)] as const);
+      const queued = this.queue.filter((j) => opened.some(([r, ids]) => this.jobFor(j, r, ids)));
+      this.queue = [...jobs, ...hashJobs, ...queued, ...this.queue.filter((j) => !queued.includes(j))];
+    } else this.queue.push(...jobs, ...hashJobs);
     void this.drain();
   }
 
-  /** 手で取り直す (先頭に入れる) */
+  /** 手で取り直す (先頭に入れる)。Civitai の ID が分からないもの (ハッシュから聞けなかったもの) は聞き直すところから */
   refresh(ref: ModelRef, names: ForgeNames) {
     this.names = names;
     const ids = this.idsOf(ref);
-    if (!ids) return;
-    this.queue = [{ kind: "fetch", ids }, ...this.queue.filter((j) => jobVersion(j) !== ids.versionId)];
+    const job: Job = ids ? { kind: "fetch", ids } : { kind: "hash", file: ref.file };
+    this.queue = [job, ...this.queue.filter((j) => !this.jobFor(j, ref, ids))];
     void this.drain();
   }
 
@@ -527,22 +589,25 @@ export class RecommendStore {
       for (let job = this.queue.shift(); job; job = this.queue.shift()) {
         this.current = job;
         if (job.kind === "fetch") {
-          this.entries[job.ids.versionId] = await this.fetchOne(job.ids);
-          this.save();
+          this.entries[job.ids.versionId] = await this.fetchOne(job.ids, job.keepSamples);
+          // 前の画像は、保存できてから消す (保存できないまま消すと、起動し直したときに前の Entry の画像が無くなる)
+          if (this.save()) pruneImages(job.ids.versionId, this.entries[job.ids.versionId]);
         } else if (job.kind === "samples") {
           const e = this.entries[job.versionId];
           if (e) {
+            let saved = true;
             try {
               const version = await civitai(`https://civitai.com/api/v1/model-versions/${job.versionId}`);
               const samples = await saveSampleImages(job.versionId, await collectSamples(job.versionId, version.images ?? [], this.pinnedUsers));
               // 集めている間に取り直されていたら、そちらを残す
               if (this.entries[job.versionId] === e) {
                 this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now(), samplesKey: samplesKey(this.pinnedUsers) };
-                this.save();
+                saved = this.save();
               }
             } catch {
               // 落ちていたら次の機会に
             }
+            if (saved) pruneImages(job.versionId, this.entries[job.versionId]);
           }
         } else {
           const ids = await this.lookupHash(job.file);
@@ -560,35 +625,44 @@ export class RecommendStore {
   private async lookupHash(file: string): Promise<CivitaiIds | null> {
     try {
       const st = statSync(file);
-      const sha256 = await sha256File(file);
+      // 中身が変わっていなければ、前に計算したハッシュで聞き直すだけにする (数 GB を読み直さないよう)
+      const prev = this.hashes[file];
+      const sha256 = prev && this.hashFresh(file, prev) ? prev.sha256 : await sha256File(file);
       let ids: CivitaiIds | null = null;
+      let error: string | null = null;
       try {
         const v = await civitai(`https://civitai.com/api/v1/model-versions/by-hash/${sha256}`);
         if (v.modelId && v.id) ids = { modelId: Number(v.modelId), versionId: Number(v.id) };
       } catch (e) {
-        // 404 は Civitai に無いモデル。それ以外 (落ちているなど) は記録せずに次の機会に
-        if (!(e instanceof CivitaiError && e.status === 404)) return null;
+        // 404 は Civitai に無いモデル。それ以外 (落ちているなど) は error を付けて、1 時間後に聞き直す
+        if (!(e instanceof CivitaiError && e.status === 404)) error = (e as Error).message;
       }
-      this.hashes[file] = { size: st.size, mtime: Math.round(st.mtimeMs), sha256, ids, checkedAt: Date.now() };
-      mkdirSync(dirname(hashPath), { recursive: true });
-      writeFileSync(hashPath, JSON.stringify(this.hashes, null, 2));
+      this.hashes[file] = { size: st.size, mtime: Math.round(st.mtimeMs), sha256, ids, checkedAt: Date.now(), ...(error && { error }) };
+      writeJson(hashPath, this.hashes);
       return ids;
     } catch {
       return null;
     }
   }
 
-  private async fetchOne({ modelId, versionId }: CivitaiIds): Promise<Entry> {
+  /** keepSamples: 前に取った作例がいまの集め方のものなら、作例はそのままにする */
+  private async fetchOne({ modelId, versionId }: CivitaiIds, keepSamples = false): Promise<Entry> {
     const base = { versionId, modelId, fetchedAt: Date.now() };
     const prev = this.entries[versionId];
+    const key = samplesKey(this.pinnedUsers);
     let name = prev?.name ?? String(versionId);
     let samples: Sample[] | null = null;
+    let imagesTriedAt = prev?.imagesTriedAt;
     try {
       const version = await civitai(`https://civitai.com/api/v1/model-versions/${versionId}`);
       const model = await civitai(`https://civitai.com/api/v1/models/${modelId}`);
       name = `${model.name ?? version.model?.name ?? ""} ${version.name ?? ""}`.trim();
-      samples = await saveSampleImages(versionId, await collectSamples(versionId, version.images ?? [], this.pinnedUsers));
-      const done = { ...base, name, samples, imagesTriedAt: Date.now(), samplesKey: samplesKey(this.pinnedUsers) };
+      if (keepSamples && prev?.samplesKey === key) samples = prev.samples;
+      else {
+        samples = await saveSampleImages(versionId, await collectSamples(versionId, version.images ?? [], this.pinnedUsers));
+        imagesTriedAt = Date.now();
+      }
+      const done = { ...base, name, samples, imagesTriedAt, samplesKey: key };
       if (!this.groq.apiKey) return { ...done, status: "no-llm", error: null, rec: null };
       const description = [htmlToText(String(model.description ?? "")), htmlToText(String(version.description ?? ""))].filter(Boolean).join("\n\n--- このバージョンの説明 ---\n");
       // Civitai のモデルの種類 (Checkpoint / LORA / LoCon / DoRA ...)
@@ -599,12 +673,18 @@ export class RecommendStore {
     } catch (e) {
       // 消されたモデルは取り直さない。取れなかったときは、前に取ってあった推奨と作例を残す
       const gone = e instanceof CivitaiError && e.status === 404;
-      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt, samplesKey: samples ? samplesKey(this.pinnedUsers) : prev?.samplesKey };
+      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt, samplesKey: samples ? key : prev?.samplesKey };
     }
   }
 
+  /** 保存できなければ false (次に保存するときにまとめて書く。ここで投げると裏の取得が止まり、プロセスも落ちるので) */
   private save() {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(this.entries, null, 2));
+    try {
+      writeJson(path, this.entries);
+      return true;
+    } catch (e) {
+      console.warn(`${path} に保存できませんでした: ${(e as Error).message}`);
+      return false;
+    }
   }
 }

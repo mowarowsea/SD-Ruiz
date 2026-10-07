@@ -21,12 +21,22 @@ export function FindReplace({
   onClose: () => void;
 }) {
   const [replacement, setReplacement] = useState("");
-  const [undo, setUndo] = useState<Texts[]>([]);
+  // before: 置き換える前、after: 置き換えた後 (戻すときに、その後で手で書き換えていないかを見る)
+  const [undo, setUndo] = useState<{ before: Texts; after: Texts }[]>([]);
   const hits = (["prompt", "negative"] as const).flatMap((key) => findTags(texts[key], query).map((hit) => ({ key, hit })));
 
   const apply = (t: Partial<Texts>) => {
-    setUndo((u) => [...u, texts]);
+    setUndo((u) => [...u, { before: texts, after: { ...texts, ...t } }]);
     onChange(t);
+  };
+
+  const undoLast = () => {
+    const last = undo[undo.length - 1];
+    // 置き換えたあとに手で書き換えていたら、それも消えるので確かめる
+    const edited = last.after.prompt !== texts.prompt || last.after.negative !== texts.negative;
+    if (edited && !confirm("置き換えたあとに書き換えた分も消えて、置き換える前に戻ります。戻しますか？")) return;
+    onChange(last.before);
+    setUndo((u) => u.slice(0, -1));
   };
 
   return (
@@ -96,10 +106,7 @@ export function FindReplace({
       {undo.length > 0 && (
         <div className="mt-2 flex justify-end">
           <button
-            onClick={() => {
-              onChange(undo[undo.length - 1]);
-              setUndo((u) => u.slice(0, -1));
-            }}
+            onClick={undoLast}
             className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[11px] text-muted active:bg-surface2"
           >
             <FontAwesomeIcon icon={faArrowRotateLeft} />

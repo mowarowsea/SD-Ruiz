@@ -1,7 +1,7 @@
 // プロンプトの検索・置換。文字列として探し、当たったところを「タグ」単位でまとめて外したり書き換えたりする
 //
 // タグは同じ括弧の深さにある , | 改行 で区切った範囲。(a, blue hair:1.2) の hair なら "blue hair:1.2"、
-// 外して括弧が空になったら括弧ごと外す
+// 外して括弧が空になったら括弧ごと外す。検索語に括弧が入っていれば、対応する括弧までをタグにする
 
 const openers = new Set(["(", "[", "{"]);
 const closers = new Set([")", "]", "}"]);
@@ -21,8 +21,20 @@ const escaped = (text: string, i: number) => text[i - 1] === "\\";
 
 /** from〜to を含むタグの範囲 (前後の空白は除く) */
 export function tagRange(text: string, from: number, to: number) {
+  // from〜to の中で対応の取れていない括弧 ("(master" の "(" など)。外側を探すときの深さの初めの値にして、対応する括弧までタグに含める
+  // (含めないと、外したときに片方の括弧だけ残る)
+  let unclosed = 0;
+  let unopened = 0;
+  for (let i = from; i < to; i++) {
+    if (escaped(text, i)) continue;
+    if (openers.has(text[i])) unclosed++;
+    else if (closers.has(text[i])) {
+      if (unclosed) unclosed--;
+      else unopened++;
+    }
+  }
   let s = from;
-  for (let depth = 0; s > 0; s--) {
+  for (let depth = unopened; s > 0; s--) {
     const c = text[s - 1];
     if (escaped(text, s - 1)) continue;
     if (closers.has(c)) depth++;
@@ -32,7 +44,7 @@ export function tagRange(text: string, from: number, to: number) {
     } else if (depth === 0 && seps.has(c)) break;
   }
   let e = to;
-  for (let depth = 0; e < text.length; e++) {
+  for (let depth = unclosed; e < text.length; e++) {
     const c = text[e];
     if (escaped(text, e)) continue;
     if (openers.has(c)) depth++;
@@ -100,7 +112,16 @@ export function findTags(text: string, query: string): Hit[] {
   return hits;
 }
 
+/**
+ * タグを外す。(a, b:1.2) の b のように括弧の最後のタグに付いた重みは括弧全体のものなので、
+ * 前にタグが残るときは重みを残して前のタグに付け直す ((a:1.2) にする。重みごと消すと a の強さが変わってしまう)
+ */
 export function removeTag(text: string, hit: Hit) {
+  const weight = /:\s*-?[\d.]+$/.exec(text.slice(hit.from, hit.to));
+  if (weight && /^\s*\)/.test(text.slice(hit.to))) {
+    const before = /\s*[,|]\s*$/.exec(text.slice(0, hit.from));
+    if (before) return text.slice(0, hit.from - before[0].length) + weight[0] + text.slice(hit.to);
+  }
   return removeRange(text, hit.from, hit.to);
 }
 

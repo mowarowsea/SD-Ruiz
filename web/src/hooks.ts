@@ -176,7 +176,7 @@ export function useTyping() {
   return typing;
 }
 
-/** モデルの推奨設定と作例。取得待ちのあいだは少しずつ問い合わせ直す */
+/** モデルの推奨設定と作例。取得待ちのあいだは問い合わせ直す (初めの 2 分は 5 秒ごと、そのあとは 30 秒ごと) */
 export function useRecommend(checkpoint: string, kind: ModelKind = "checkpoint") {
   const [view, setView] = useState<RecommendView | null>(null);
   const [version, bump] = useState(0);
@@ -189,8 +189,8 @@ export function useRecommend(checkpoint: string, kind: ModelKind = "checkpoint")
       const v = await api.recommend(checkpoint, kind).catch(() => null);
       if (!alive) return;
       setView(v);
-      // ほかのモデルの順番待ちもあるので、長めに待つ
-      if (v?.status === "pending" && tries < 60) timer = window.setTimeout(() => load(tries + 1), 5000);
+      // ほかのモデルの順番待ちで長くかかることもあるので、回数では打ち切らない (打ち切ると、取れたあとも「取得中」のままになる)
+      if (v?.status === "pending") timer = window.setTimeout(() => load(tries + 1), tries < 24 ? 5000 : 30_000);
     };
     void load(0);
     return () => {
