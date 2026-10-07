@@ -116,13 +116,15 @@ export interface Sample {
   scheduler: string | null;
   seed: number | null;
   clipSkip: number | null;
+  /** BFF に保存した画像 (無ければ Civitai から直接読む) */
+  file?: string;
 }
 
 export interface RecommendView {
   /** pending: 取得待ち / none: Civitai に無い / gone: Civitai から消えている / no-llm: Groq のキーが無いので作例だけ */
   status: "ok" | "no-llm" | "gone" | "error" | "pending" | "none";
   url: string | null;
-  entry: { name: string; fetchedAt: number; error: string | null; rec: Recommendation | null; samples: Sample[] } | null;
+  entry: { name: string; fetchedAt: number; error: string | null; rec: Recommendation | null; samples: Sample[]; imagesTriedAt?: number } | null;
 }
 
 export interface TagHit {
@@ -384,4 +386,9 @@ export function formatRange(r: Range | null) {
 /** Civitai の画像を幅を指定して読む (original=true のままだと数 MB ある) */
 export function civitaiImage(url: string, width: number) {
   return url.replace(/\/(original=true|width=\d+)\//, `/width=${width}/`);
+}
+
+/** 作例の画像。BFF に保存してあればそれを、無ければ Civitai から (v は取り直したときにキャッシュを外す用) */
+export function sampleImage(s: Sample, size: "thumb" | "full", v = 0) {
+  return s.file ? `/api/recommend/image?f=${encodeURIComponent(s.file)}&size=${size}&v=${v}` : civitaiImage(s.url, size === "thumb" ? 450 : 1024);
 }

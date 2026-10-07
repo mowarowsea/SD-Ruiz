@@ -1,9 +1,11 @@
-// モデルの推奨設定と作例。Civitai の説明文を LLM (Groq) で JSON にまとめ、data/recommended.json に覚えておく
+// モデルの推奨設定と作例。Civitai の説明文を LLM (Groq) で JSON にまとめ、data/recommended.json に覚えておく。
+// 作例の画像も data/recommend-images/ に保存する (Civitai から消えても見られるように)
 
 import { createHash } from "node:crypto";
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 
 export interface Range {
   min: number | null;
@@ -46,6 +48,8 @@ export interface Sample {
   scheduler: string | null;
   seed: number | null;
   clipSkip: number | null;
+  /** 手元に保存した画像 ("{versionId}/{n}"。保存できていなければ無い) */
+  file?: string;
 }
 
 export interface Entry {
@@ -58,6 +62,8 @@ export interface Entry {
   error: string | null;
   rec: Recommendation | null;
   samples: Sample[];
+  /** 作例の画像を保存しようとした日時 (古い Entry には無い) */
+  imagesTriedAt?: number;
 }
 
 /** Forge の選択肢 (LLM に名前を合わせてもらう) */
@@ -83,6 +89,7 @@ interface HashLookup {
 
 const path = fileURLToPath(new URL("../data/recommended.json", import.meta.url));
 const hashPath = fileURLToPath(new URL("../data/model-hashes.json", import.meta.url));
+const imageDir = fileURLToPath(new URL("../data/recommend-images", import.meta.url));
 const retryAfterError = 60 * 60_000;
 const ua = { "user-agent": "SD-Ruiz (personal txt2img frontend)" };
 
@@ -298,7 +305,42 @@ export interface ModelRef {
   civitai: CivitaiIds | null;
 }
 
-type Job = { kind: "fetch"; ids: CivitaiIds } | { kind: "hash"; file: string };
+type Job = { kind: "fetch"; ids: CivitaiIds } | { kind: "hash"; file: string } | { kind: "images"; versionId: number };
+
+const jobVersion = (j: Job) => (j.kind === "fetch" ? j.ids.versionId : j.kind === "images" ? j.versionId : null);
+
+/** 保存した作例の画像 (full は長辺 1024、thumb は幅 450) のパス。名前がおかしければ null */
+export function sampleImagePath(file: string, size: "full" | "thumb") {
+  if (!/^\d+\/\d+$/.test(file)) return null;
+  return join(imageDir, `${file}${size === "thumb" ? "-thumb" : ""}.webp`);
+}
+
+/** 作例の画像を Civitai から落として webp で保存する。落とせなかったものは file を付けない (画面では Civitai から直接読む) */
+async function saveSampleImages(versionId: number, samples: Sample[]): Promise<Sample[]> {
+  // 別のフォルダに落としてから入れ替える (途中で止まっても前の画像が残るように)
+  const dir = join(imageDir, String(versionId));
+  const tmp = `${dir}.new`;
+  rmSync(tmp, { recursive: true, force: true });
+  mkdirSync(tmp, { recursive: true });
+  const out: Sample[] = [];
+  for (const [i, { file: _, ...s }] of samples.entries()) {
+    try {
+      const res = await fetch(s.url.replace(/\/(original=true|width=\d+)\//, "/width=1024/"), { headers: ua, signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) throw new Error(String(res.status));
+      const buf = Buffer.from(await res.arrayBuffer());
+      const file = `${versionId}/${i}`;
+      await sharp(buf).resize({ width: 1024, height: 1024, fit: "inside", withoutEnlargement: true }).webp({ quality: 85 }).toFile(join(tmp, `${i}.webp`));
+      await sharp(buf).resize({ width: 450, withoutEnlargement: true }).webp({ quality: 80 }).toFile(join(tmp, `${i}-thumb.webp`));
+      out.push({ ...s, file });
+    } catch {
+      out.push(s);
+    }
+    await sleep(300);
+  }
+  rmSync(dir, { recursive: true, force: true });
+  renameSync(tmp, dir);
+  return out;
+}
 
 export class RecommendStore {
   private entries: Record<string, Entry> = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
@@ -341,7 +383,7 @@ export class RecommendStore {
 
   private isQueued(ref: ModelRef) {
     const ids = this.idsOf(ref);
-    return [this.current, ...this.queue].some((j) => j && (j.kind === "hash" ? j.file === ref.file : j.ids.versionId === ids?.versionId));
+    return [this.current, ...this.queue].some((j) => j && (j.kind === "hash" ? j.file === ref.file : jobVersion(j) === ids?.versionId));
   }
 
   /** まだ取っていない (か、失敗してから時間が経った) モデルを取りにいく。付随ファイルの無いものはハッシュから Civitai の ID を引く */
@@ -361,6 +403,8 @@ export class RecommendStore {
       // キーを後から足したら、作例だけのものも取り直す
       const stale = !e || (e.status === "error" && Date.now() - e.fetchedAt > retryAfterError) || (e.status === "no-llm" && this.groq.apiKey);
       if (stale) this.queue.push({ kind: "fetch", ids });
+      // 画像を保存するようになる前に取ったものは、画像だけ落とす
+      else if (!e.imagesTriedAt && e.samples.length) this.queue.push({ kind: "images", versionId: ids.versionId });
     }
     this.queue.push(...hashJobs);
     void this.drain();
@@ -371,7 +415,7 @@ export class RecommendStore {
     this.names = names;
     const ids = this.idsOf(ref);
     if (!ids) return;
-    this.queue = [{ kind: "fetch", ids }, ...this.queue.filter((j) => j.kind !== "fetch" || j.ids.versionId !== ids.versionId)];
+    this.queue = [{ kind: "fetch", ids }, ...this.queue.filter((j) => jobVersion(j) !== ids.versionId)];
     void this.drain();
   }
 
@@ -383,6 +427,16 @@ export class RecommendStore {
         if (job.kind === "fetch") {
           this.entries[job.ids.versionId] = await this.fetchOne(job.ids);
           this.save();
+        } else if (job.kind === "images") {
+          const e = this.entries[job.versionId];
+          if (e) {
+            const samples = await saveSampleImages(job.versionId, e.samples);
+            // 落としている間に取り直されていたら、そちらを残す
+            if (this.entries[job.versionId] === e) {
+              this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now() };
+              this.save();
+            }
+          }
         } else {
           const ids = await this.lookupHash(job.file);
           // 見つかったらそのまま取りにいく
@@ -419,21 +473,23 @@ export class RecommendStore {
 
   private async fetchOne({ modelId, versionId }: CivitaiIds): Promise<Entry> {
     const base = { versionId, modelId, fetchedAt: Date.now() };
-    let name = String(versionId);
-    let samples: Sample[] = [];
+    const prev = this.entries[versionId];
+    let name = prev?.name ?? String(versionId);
+    let samples: Sample[] | null = null;
     try {
       const version = await civitai(`https://civitai.com/api/v1/model-versions/${versionId}`);
       const model = await civitai(`https://civitai.com/api/v1/models/${modelId}`);
       name = `${model.name ?? version.model?.name ?? ""} ${version.name ?? ""}`.trim();
-      samples = ((version.images ?? []) as Record<string, any>[]).map(toSample).filter((s): s is Sample => !!s);
-      if (!this.groq.apiKey) return { ...base, name, status: "no-llm", error: null, rec: null, samples };
+      samples = await saveSampleImages(versionId, ((version.images ?? []) as Record<string, any>[]).map(toSample).filter((s): s is Sample => !!s));
+      const done = { ...base, name, samples, imagesTriedAt: Date.now() };
+      if (!this.groq.apiKey) return { ...done, status: "no-llm", error: null, rec: null };
       const description = [htmlToText(String(model.description ?? "")), htmlToText(String(version.description ?? ""))].filter(Boolean).join("\n\n--- このバージョンの説明 ---\n");
       const rec = await askGroq(this.groq.apiKey, this.groq.model, buildPrompt(name, description, samples, this.names));
-      return { ...base, name, status: "ok", error: null, rec, samples };
+      return { ...done, status: "ok", error: null, rec };
     } catch (e) {
-      // 消されたモデルは取り直さない
+      // 消されたモデルは取り直さない。取れなかったときは、前に取ってあった推奨と作例を残す
       const gone = e instanceof CivitaiError && e.status === 404;
-      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: null, samples };
+      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt };
     }
   }
 

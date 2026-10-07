@@ -16,7 +16,7 @@ import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
 import { type ModelParams, PrefsStore } from "./prefs.js";
-import { RecommendStore } from "./recommend.js";
+import { RecommendStore, sampleImagePath } from "./recommend.js";
 import { Wildcards } from "./wildcards.js";
 
 const cfg = loadConfig();
@@ -155,6 +155,13 @@ server.post<{ Body: { id?: string } }>("/api/recommend/refresh", async (req) => 
   const [samplers, schedulers] = await Promise.all([forge.samplers(), forge.schedulers()]);
   recommend.refresh(ref, { samplers: samplers.map((s) => s.name), schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })) });
   return recommend.view(ref);
+});
+
+// 保存した作例の画像 (取り直すと同じ名前で中身が変わるので、キャッシュは短め)
+server.get<{ Querystring: { f?: string; size?: string } }>("/api/recommend/image", async (req, reply) => {
+  const file = sampleImagePath(req.query.f ?? "", req.query.size === "thumb" ? "thumb" : "full");
+  if (!file || !existsSync(file)) return reply.code(404).send({ error: "not found" });
+  return reply.type("image/webp").header("cache-control", "private, max-age=3600").send(await readFile(file));
 });
 
 // プロンプト補完: タグは件数が多いのでサーバー側で検索する

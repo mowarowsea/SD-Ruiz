@@ -1,7 +1,7 @@
 import { faArrowRotateRight, faArrowUpRightFromSquare, faChevronLeft } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useState } from "react";
-import { civitaiImage, formatRange, type GenerateParams, type Meta, type RecommendView, type Sample } from "../api";
+import { formatRange, sampleImage, type GenerateParams, type Meta, type RecommendView, type Sample } from "../api";
 import { usePersistentState } from "../hooks";
 import { sampleParams, schedulerLabel } from "../recommend";
 import { PromptEditor } from "./PromptEditor";
@@ -37,6 +37,8 @@ export function RecommendSheet({
   const entry = view?.entry;
   const rec = entry?.rec;
   const samples = entry?.samples ?? [];
+  // 取得待ちのあいだと、Civitai に無いモデルは出さない
+  const canRefresh = !!view && view.status !== "pending" && view.status !== "none";
 
   const refresh = async () => {
     setRefreshing(true);
@@ -56,13 +58,25 @@ export function RecommendSheet({
   if (selected)
     return (
       <Sheet open={open} onClose={close} title="作例" aside={link}>
-        <SampleDetail sample={selected} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
+        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
       </Sheet>
     );
 
   return (
     <Sheet open={open} onClose={close} title="推奨と作例" aside={link}>
-      {entry?.name && <p className="mb-3 truncate text-xs text-muted">{entry.name}</p>}
+      {(entry?.name || canRefresh) && (
+        <div className="mb-3 flex items-center gap-3">
+          <p className="min-w-0 flex-1 truncate text-xs text-muted">
+            {entry?.name}
+            {entry && <span className="ml-1.5">· {new Date(entry.fetchedAt).toLocaleDateString()} 取得</span>}
+          </p>
+          {canRefresh && (
+            <button onClick={refresh} disabled={refreshing} className="flex-none rounded-full border border-line px-2.5 py-1 text-[11px] text-accent disabled:opacity-40">
+              <FontAwesomeIcon icon={faArrowRotateRight} className={refreshing ? "animate-spin" : ""} /> 再取得
+            </button>
+          )}
+        </div>
+      )}
       <StatusNote view={view} />
 
       {rec && (
@@ -93,12 +107,6 @@ export function RecommendSheet({
       )}
       {rec && (rec.quality || rec.negative) && <p className="mt-2 px-1 text-[11px] text-muted">プロンプト欄で /quality・/negative と打つと補完に出ます</p>}
 
-      {view && (view.status === "ok" || view.status === "no-llm" || view.status === "error") && (
-        <button onClick={refresh} disabled={refreshing} className="mt-3 text-xs text-accent disabled:opacity-40">
-          <FontAwesomeIcon icon={faArrowRotateRight} className={refreshing ? "animate-spin" : ""} /> 取り直す
-        </button>
-      )}
-
       {samples.length > 0 && (
         <>
           <div className="mt-5 mb-2 flex items-center justify-between">
@@ -112,7 +120,7 @@ export function RecommendSheet({
           <div className="grid grid-cols-2 gap-2">
             {samples.map((s) => (
               <button key={s.url} onClick={() => setSelected(s)} className="relative overflow-hidden rounded-xl bg-surface2" style={{ aspectRatio: s.width && s.height ? `${s.width} / ${s.height}` : "2 / 3" }}>
-                <img src={civitaiImage(s.url, 450)} alt="" loading="lazy" className={`size-full object-cover ${isR18(s) && !opts.r18 ? "scale-110 blur-xl" : ""}`} />
+                <img src={sampleImage(s, "thumb", entry?.imagesTriedAt)} alt="" loading="lazy" className={`size-full object-cover ${isR18(s) && !opts.r18 ? "scale-110 blur-xl" : ""}`} />
                 {isR18(s) && !opts.r18 && <span className="absolute inset-0 grid place-items-center text-xs text-white/80">R18</span>}
               </button>
             ))}
@@ -128,15 +136,16 @@ function StatusNote({ view }: { view: RecommendView | null }) {
   if (!view) return note("読み込み中…");
   switch (view.status) {
     case "pending":
+      if (view.entry) return note("Civitai から取り直しています (作例の画像の保存も)。ほかのモデルの順番待ちで少しかかることがあります。いまは前に取ったものを出しています");
       return note("Civitai から取得中です。ほかのモデルの順番待ちや、ファイルのハッシュの計算 (付随ファイルの無いモデル) で少しかかります");
     case "none":
       return note("Civitai にこのモデルが見つかりませんでした (ファイルのハッシュで探しています)");
     case "gone":
-      return note("Civitai からこのモデルが消えています");
+      return note(view.entry?.samples.length || view.entry?.rec ? "Civitai からこのモデルが消えています (前に取った推奨と作例を出しています)" : "Civitai からこのモデルが消えています");
     case "no-llm":
       return note("Groq の API キーが無いので、推奨設定は読み取っていません (作例だけ)。環境変数 GROQ_API_KEY か config.json の groqApiKey に入れてください");
     case "error":
-      return note(`取得できませんでした: ${view.entry?.error ?? ""} (1 時間後に自動で取り直します)`, true);
+      return note(`取得できませんでした: ${view.entry?.error ?? ""} (1 時間後に自動で取り直します。前に取ったものがあればそれを出しています)`, true);
     default:
       return view.entry?.rec && Object.values(view.entry.rec).every((v) => v === null || (Array.isArray(v) && !v.length)) ? note("説明文と作例に推奨設定が見つかりませんでした") : null;
   }
@@ -152,7 +161,7 @@ function Row({ label, mono = false, children }: { label: string; mono?: boolean;
   );
 }
 
-function SampleDetail({ sample, meta, onBack, onUse }: { sample: Sample; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: number; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   const params = [
     sample.width && `${sample.width}×${sample.height}`,
     sample.steps !== null && `${sample.steps}st`,
@@ -168,7 +177,7 @@ function SampleDetail({ sample, meta, onBack, onUse }: { sample: Sample; meta: M
       <button onClick={onBack} className="mb-3 text-xs text-accent">
         <FontAwesomeIcon icon={faChevronLeft} /> 一覧へ
       </button>
-      <img src={civitaiImage(sample.url, 1024)} alt="" className="mx-auto max-h-[50vh] rounded-xl object-contain" />
+      <img src={sampleImage(sample, "full", v)} alt="" className="mx-auto max-h-[50vh] rounded-xl object-contain" />
       <p className="mt-3 font-mono text-[11px] text-muted">{params.join(" · ")}</p>
       <div className="mt-3 mb-1.5 text-[11px] tracking-wider text-muted uppercase">Prompt</div>
       <PromptEditor value={sample.prompt} readOnly copyable />
