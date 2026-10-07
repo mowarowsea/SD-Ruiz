@@ -67,8 +67,15 @@ export function GeneratePage({
   const rec = recommend.view?.entry?.rec ?? null;
   const sampleCount = recommend.view?.entry?.samples.length ?? 0;
   useEffect(() => setPromptPresets({ quality: rec?.quality ?? null, negative: rec?.negative ?? null }), [rec]);
-  const applySample = (p: Partial<GenerateParams>, skipped: string[]) => {
+  // Checkpoint の一覧から開いた、別のモデルの推奨と作例。閉じたら一覧に戻る
+  const [browsing, setBrowsing] = useState<string | null>(null);
+  const browse = useRecommend(browsing ?? "");
+  // 作例を使って閉じたときは、一覧に戻らない
+  const usedSample = useRef(false);
+  const applySample = (p: Partial<GenerateParams>, skipped: string[], checkpoint?: string) => {
     if ((form.prompt.trim() || form.negative.trim()) && !confirm("いまの Prompt / Negative を作例のもので上書きします")) return;
+    // 別のモデルの作例なら、そのモデルに切り替えて (前回の設定に戻して) から入れる
+    if (checkpoint && checkpoint !== form.checkpoint) selectCheckpoint(checkpoint);
     patch(p);
     setRestored(skipped.length ? `作例を入れました (そのまま使えないので変えなかった: ${skipped.join("、")})` : "作例を入れました");
   };
@@ -242,9 +249,30 @@ export function GeneratePage({
             void reloadPrefs();
           }}
           onRefresh={onReloadCheckpoints}
+          onRecommend={(title) => {
+            if (title === form.checkpoint) return setSheet("recommend");
+            setBrowsing(title);
+            setSheet(null);
+          }}
         />
       )}
       <RecommendSheet open={sheet === "recommend"} onClose={() => setSheet(null)} view={recommend.view} meta={meta} onRefresh={recommend.refresh} onUse={applySample} />
+      <RecommendSheet
+        open={!!browsing}
+        onClose={() => {
+          setBrowsing(null);
+          setSheet(usedSample.current ? null : "checkpoint");
+          usedSample.current = false;
+        }}
+        view={browse.view}
+        meta={meta}
+        onRefresh={browse.refresh}
+        onUse={(p, skipped) => {
+          usedSample.current = true;
+          applySample(p, skipped, browsing!);
+        }}
+        other={browsing ? modelLabel(browsing) : undefined}
+      />
       <LoraSheet
         open={sheet === "lora"}
         onClose={() => setSheet(null)}

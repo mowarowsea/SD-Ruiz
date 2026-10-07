@@ -1,3 +1,5 @@
+import { faCircleInfo } from "@fortawesome/free-solid-svg-icons";
+import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { useMemo, useState } from "react";
 import { baseLabel, type Model, modelFolder, modelLabel, type Prefs } from "../api";
 import { Sheet } from "./Sheet";
@@ -6,7 +8,7 @@ import { BaseBadge, confirmDeleteModel, DeleteMark, DeleteModeButton, FilterChip
 
 type Filter = "all" | "fav" | "recent" | `folder:${string}`;
 
-/** Checkpoint 選択。プレビューつきのカードを 2 列で並べる。削除モードではタップで (確認してから) 削除する */
+/** Checkpoint 選択。プレビューつきのカードを 2 列で並べる。削除モードではタップで (確認してから) 削除する。(i) でそのモデルの推奨と作例を開く */
 export function CheckpointSheet({
   open,
   onClose,
@@ -17,6 +19,7 @@ export function CheckpointSheet({
   onFavorite,
   onDeleted,
   onRefresh,
+  onRecommend,
 }: {
   open: boolean;
   onClose: () => void;
@@ -28,6 +31,8 @@ export function CheckpointSheet({
   onDeleted: (title: string) => void;
   /** Forge に読み直してもらい、一覧を取り直す */
   onRefresh: () => Promise<void>;
+  /** そのモデルの推奨と作例を開く */
+  onRecommend: (title: string) => void;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -105,13 +110,18 @@ export function CheckpointSheet({
               <Thumb kind="checkpoint" id={m.title} has={m.preview} className="aspect-[3/4] w-full" />
               {deleting && <DeleteMark className="absolute inset-0" />}
               <BaseBadge label={baseLabel(m.base)} className="absolute top-2 left-2" />
-              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent px-2.5 pt-6 pb-2">
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/60 to-transparent pt-6 pr-8 pb-2 pl-2.5">
                 <div className="line-clamp-2 text-[12px] leading-tight font-semibold break-all text-white">{modelLabel(m.title)}</div>
                 <div className="truncate text-[10px] text-white/55">{modelFolder(m.title)}</div>
               </div>
             </button>
             {/* ボタンの入れ子にならないよう、カードの外に重ねる */}
             {!deleting && <Star on={favs.has(m.title)} onClick={() => onFavorite(m.title, !favs.has(m.title))} className="absolute top-0.5 right-0.5 drop-shadow" />}
+            {!deleting && (
+              <button aria-label="推奨と作例" onClick={() => onRecommend(m.title)} className="absolute right-0.5 bottom-1 grid size-8 place-items-center text-sm text-white/70 drop-shadow">
+                <FontAwesomeIcon icon={faCircleInfo} />
+              </button>
+            )}
           </li>
         ))}
       </ul>

@@ -18,6 +18,7 @@ export function RecommendSheet({
   meta,
   onRefresh,
   onUse,
+  other,
 }: {
   open: boolean;
   onClose: () => void;
@@ -26,6 +27,8 @@ export function RecommendSheet({
   onRefresh: () => Promise<void>;
   /** 作例を使う。skipped は Forge に合わずに入れなかった項目 */
   onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void;
+  /** いま選んでいるのとは別のモデル (一覧から開いたとき) の名前。作例を使うとこのモデルにも切り替える */
+  other?: string;
 }) {
   const [selected, setSelected] = useState<Sample | null>(null);
   const [opts, setOpts] = usePersistentState("ruiz.samples", { r18: false });
@@ -58,16 +61,16 @@ export function RecommendSheet({
   if (selected)
     return (
       <Sheet open={open} onClose={close} title="作例" aside={link}>
-        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
+        <SampleDetail sample={selected} v={entry?.imagesTriedAt ?? 0} other={other} meta={meta} onBack={() => setSelected(null)} onUse={(patch, skipped) => (onUse(patch, skipped), close())} />
       </Sheet>
     );
 
   return (
     <Sheet open={open} onClose={close} title="推奨と作例" aside={link}>
-      {(entry?.name || canRefresh) && (
+      {(entry?.name || other || canRefresh) && (
         <div className="mb-3 flex items-center gap-3">
           <p className="min-w-0 flex-1 truncate text-xs text-muted">
-            {entry?.name}
+            {entry?.name ?? other}
             {entry && <span className="ml-1.5">· {new Date(entry.fetchedAt).toLocaleDateString()} 取得</span>}
           </p>
           {canRefresh && (
@@ -169,7 +172,7 @@ function Row({ label, mono = false, children }: { label: string; mono?: boolean;
   );
 }
 
-function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: number; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+function SampleDetail({ sample, v, other, meta, onBack, onUse }: { sample: Sample; v: number; other?: string; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   return (
     <div>
       <button onClick={onBack} className="mb-3 text-xs text-accent">
@@ -180,14 +183,14 @@ function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: n
       {sample.noInfo ? (
         <p className="mt-3 rounded-lg bg-surface2 px-3 py-2 text-xs leading-relaxed">この作例には生成情報 (プロンプトや設定) が付いていないので、見るだけです</p>
       ) : (
-        <SampleInfo sample={sample} meta={meta} onUse={onUse} />
+        <SampleInfo sample={sample} other={other} meta={meta} onUse={onUse} />
       )}
     </div>
   );
 }
 
 /** 作例の生成情報と、生成画面に入れるボタン */
-function SampleInfo({ sample, meta, onUse }: { sample: Sample; meta: Meta | null; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+function SampleInfo({ sample, other, meta, onUse }: { sample: Sample; other?: string; meta: Meta | null; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   const params = [
     sample.width && `${sample.width}×${sample.height}`,
     sample.steps !== null && `${sample.steps}st`,
@@ -223,7 +226,10 @@ function SampleInfo({ sample, meta, onUse }: { sample: Sample; meta: Meta | null
           設定も使う
         </button>
       </div>
-      <p className="mt-2 text-[11px] text-muted">いまの Prompt / Negative を上書きします (Seed は変えません)</p>
+      <p className="mt-2 text-[11px] text-muted">
+        いまの Prompt / Negative を上書きします (Seed は変えません)
+        {other && "。Checkpoint もこのモデルに切り替えます"}
+      </p>
     </>
   );
 }
