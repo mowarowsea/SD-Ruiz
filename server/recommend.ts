@@ -33,7 +33,7 @@ export interface Recommendation {
   notes: string[];
 }
 
-/** 作者の作例 (生成情報のあるもの) */
+/** 作例。作者のもの (生成情報の無いものも) と、足りなければほかの人の投稿 (生成情報のあるものだけ) */
 export interface Sample {
   url: string;
   width: number;
@@ -50,6 +50,10 @@ export interface Sample {
   clipSkip: number | null;
   /** 手元に保存した画像 ("{versionId}/{n}"。保存できていなければ無い) */
   file?: string;
+  /** 生成情報が無い (見るだけ) */
+  noInfo?: true;
+  /** ほかの人の投稿なら投稿者 (作者の作例には無い) */
+  by?: string;
 }
 
 export interface Entry {
@@ -64,6 +68,8 @@ export interface Entry {
   samples: Sample[];
   /** 作例の画像を保存しようとした日時 (古い Entry には無い) */
   imagesTriedAt?: number;
+  /** 作例の集め方の版 (samplesRev より古ければ作例だけ集め直す) */
+  samplesRev?: number;
 }
 
 /** Forge の選択肢 (LLM に名前を合わせてもらう) */
@@ -141,14 +147,23 @@ function sha256File(file: string) {
 
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v)) ? Number(v) : null);
 
+/** /api/v1/images の nsfwLevel は文字 (None / Soft / Mature / X) */
+const nsfwLevels: Record<string, number> = { None: 1, Soft: 2, Mature: 4, X: 8 };
+
+/** 生成情報が無ければ noInfo にする (見るだけ)。画像でないもの (動画) は null */
 function toSample(img: Record<string, any>): Sample | null {
-  const m = img.meta as Record<string, unknown> | null;
-  if (img.type !== "image" || !m || typeof m.prompt !== "string" || m.prompt.length < 10) return null;
-  return {
+  if (img.type !== "image") return null;
+  const base = {
     url: String(img.url),
     width: Number(img.width) || 0,
     height: Number(img.height) || 0,
-    nsfwLevel: Number(img.nsfwLevel) || 0,
+    nsfwLevel: typeof img.nsfwLevel === "string" ? (nsfwLevels[img.nsfwLevel] ?? 0) : Number(img.nsfwLevel) || 0,
+  };
+  const m = img.meta as Record<string, unknown> | null;
+  if (!m || typeof m.prompt !== "string" || m.prompt.length < 10)
+    return { ...base, prompt: "", negative: "", steps: null, cfg: null, sampler: null, scheduler: null, seed: null, clipSkip: null, noInfo: true };
+  return {
+    ...base,
     prompt: m.prompt,
     negative: typeof m.negativePrompt === "string" ? m.negativePrompt : "",
     steps: num(m.steps),
@@ -160,8 +175,47 @@ function toSample(img: Record<string, any>): Sample | null {
   };
 }
 
+/** 作例の集め方の版。上げると、取ってあるモデルの作例を集め直す (推奨はそのまま) */
+const samplesRev = 2;
+/** 生成情報のある作例がこれより少なければ、ほかの人の投稿から足す */
+const wantSamples = 10;
+
+const imageId = (url: string) => url.match(/\/(\d+)\.\w+$/)?.[1] ?? url;
+
+/**
+ * 作例を集める。作者の作例 (バージョンに付いている画像) は生成情報が無くても入れる。
+ * 生成情報のあるものが足りなければ、ほかの人の投稿 (反応の多い順) から足す。
+ * /api/v1/images は withMeta=true が無いと生成情報を返さない。nsfw=X が無いと全年齢のものしか返さない。落ちていたら足さない
+ */
+async function collectSamples(versionId: number, versionImages: Record<string, any>[]): Promise<Sample[]> {
+  let posts: Record<string, any>[] = [];
+  try {
+    posts = ((await civitai(`https://civitai.com/api/v1/images?modelVersionId=${versionId}&limit=50&sort=Most%20Reactions&withMeta=true&nsfw=X`)).items ?? []) as Record<string, any>[];
+  } catch {}
+  const postById = new Map(posts.map((p) => [imageId(String(p.url)), p]));
+  // 作者の作例でも、バージョンの API には生成情報が無く、画像の API にはあることがある
+  const author = versionImages
+    .map((img) => {
+      const s = toSample(img);
+      const post = postById.get(imageId(String(img.url)));
+      return s?.noInfo && post ? (toSample({ ...post, url: img.url }) ?? s) : s;
+    })
+    .filter((s): s is Sample => !!s);
+  const seen = new Set(author.map((s) => imageId(s.url)));
+  const others: Sample[] = [];
+  for (const p of posts) {
+    if (author.filter((s) => !s.noInfo).length + others.length >= wantSamples) break;
+    const s = toSample(p);
+    if (!s || s.noInfo || seen.has(imageId(s.url))) continue;
+    seen.add(imageId(s.url));
+    others.push({ ...s, by: typeof p.username === "string" ? p.username : "?" });
+  }
+  return [...author, ...others];
+}
+
 /** 作例の設定を LLM に渡す形にまとめる (多いものから) */
-function summarizeSamples(samples: Sample[]) {
+function summarizeSamples(all: Sample[]) {
+  const samples = all.filter((s) => !s.noInfo);
   if (!samples.length) return "(作例の生成情報なし)";
   const count = (vals: (string | number | null)[]) => {
     const m = new Map<string, number>();
@@ -305,9 +359,9 @@ export interface ModelRef {
   civitai: CivitaiIds | null;
 }
 
-type Job = { kind: "fetch"; ids: CivitaiIds } | { kind: "hash"; file: string } | { kind: "images"; versionId: number };
+type Job = { kind: "fetch"; ids: CivitaiIds } | { kind: "hash"; file: string } | { kind: "samples"; versionId: number };
 
-const jobVersion = (j: Job) => (j.kind === "fetch" ? j.ids.versionId : j.kind === "images" ? j.versionId : null);
+const jobVersion = (j: Job) => (j.kind === "fetch" ? j.ids.versionId : j.kind === "samples" ? j.versionId : null);
 
 /** 保存した作例の画像 (full は長辺 1024、thumb は幅 450) のパス。名前がおかしければ null */
 export function sampleImagePath(file: string, size: "full" | "thumb") {
@@ -403,8 +457,8 @@ export class RecommendStore {
       // キーを後から足したら、作例だけのものも取り直す
       const stale = !e || (e.status === "error" && Date.now() - e.fetchedAt > retryAfterError) || (e.status === "no-llm" && this.groq.apiKey);
       if (stale) this.queue.push({ kind: "fetch", ids });
-      // 画像を保存するようになる前に取ったものは、画像だけ落とす
-      else if (!e.imagesTriedAt && e.samples.length) this.queue.push({ kind: "images", versionId: ids.versionId });
+      // 作例の集め方を変える前に取ったものは、作例だけ集め直す (画像の保存も)
+      else if ((e.samplesRev ?? 0) < samplesRev && e.status !== "gone") this.queue.push({ kind: "samples", versionId: ids.versionId });
     }
     this.queue.push(...hashJobs);
     void this.drain();
@@ -427,14 +481,19 @@ export class RecommendStore {
         if (job.kind === "fetch") {
           this.entries[job.ids.versionId] = await this.fetchOne(job.ids);
           this.save();
-        } else if (job.kind === "images") {
+        } else if (job.kind === "samples") {
           const e = this.entries[job.versionId];
           if (e) {
-            const samples = await saveSampleImages(job.versionId, e.samples);
-            // 落としている間に取り直されていたら、そちらを残す
-            if (this.entries[job.versionId] === e) {
-              this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now() };
-              this.save();
+            try {
+              const version = await civitai(`https://civitai.com/api/v1/model-versions/${job.versionId}`);
+              const samples = await saveSampleImages(job.versionId, await collectSamples(job.versionId, version.images ?? []));
+              // 集めている間に取り直されていたら、そちらを残す
+              if (this.entries[job.versionId] === e) {
+                this.entries[job.versionId] = { ...e, samples, imagesTriedAt: Date.now(), samplesRev };
+                this.save();
+              }
+            } catch {
+              // 落ちていたら次の機会に
             }
           }
         } else {
@@ -480,8 +539,8 @@ export class RecommendStore {
       const version = await civitai(`https://civitai.com/api/v1/model-versions/${versionId}`);
       const model = await civitai(`https://civitai.com/api/v1/models/${modelId}`);
       name = `${model.name ?? version.model?.name ?? ""} ${version.name ?? ""}`.trim();
-      samples = await saveSampleImages(versionId, ((version.images ?? []) as Record<string, any>[]).map(toSample).filter((s): s is Sample => !!s));
-      const done = { ...base, name, samples, imagesTriedAt: Date.now() };
+      samples = await saveSampleImages(versionId, await collectSamples(versionId, version.images ?? []));
+      const done = { ...base, name, samples, imagesTriedAt: Date.now(), samplesRev };
       if (!this.groq.apiKey) return { ...done, status: "no-llm", error: null, rec: null };
       const description = [htmlToText(String(model.description ?? "")), htmlToText(String(version.description ?? ""))].filter(Boolean).join("\n\n--- このバージョンの説明 ---\n");
       const rec = await askGroq(this.groq.apiKey, this.groq.model, buildPrompt(name, description, samples, this.names));
@@ -489,7 +548,7 @@ export class RecommendStore {
     } catch (e) {
       // 消されたモデルは取り直さない。取れなかったときは、前に取ってあった推奨と作例を残す
       const gone = e instanceof CivitaiError && e.status === 404;
-      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt };
+      return { ...base, name, status: gone ? "gone" : "error", error: (e as Error).message, rec: prev?.rec ?? null, samples: samples ?? prev?.samples ?? [], imagesTriedAt: samples ? Date.now() : prev?.imagesTriedAt, samplesRev: samples ? samplesRev : prev?.samplesRev };
     }
   }
 

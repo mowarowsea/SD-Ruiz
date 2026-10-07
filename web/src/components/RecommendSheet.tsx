@@ -110,7 +110,10 @@ export function RecommendSheet({
       {samples.length > 0 && (
         <>
           <div className="mt-5 mb-2 flex items-center justify-between">
-            <h3 className="text-sm font-semibold">作例 ({samples.length})</h3>
+            <h3 className="text-sm font-semibold">
+              作例 ({samples.length})
+              {samples.some((s) => s.by) && <span className="ml-1.5 text-[11px] font-normal text-muted">@ はほかの人の投稿</span>}
+            </h3>
             {samples.some(isR18) && (
               <button onClick={() => setOpts({ r18: !opts.r18 })} className={`rounded-full border px-2.5 py-1 text-[11px] ${opts.r18 ? "border-accent text-accent" : "border-line text-muted"}`}>
                 R18 を表示
@@ -122,6 +125,9 @@ export function RecommendSheet({
               <button key={s.url} onClick={() => setSelected(s)} className="relative overflow-hidden rounded-xl bg-surface2" style={{ aspectRatio: s.width && s.height ? `${s.width} / ${s.height}` : "2 / 3" }}>
                 <img src={sampleImage(s, "thumb", entry?.imagesTriedAt)} alt="" loading="lazy" className={`size-full object-cover ${isR18(s) && !opts.r18 ? "scale-110 blur-xl" : ""}`} />
                 {isR18(s) && !opts.r18 && <span className="absolute inset-0 grid place-items-center text-xs text-white/80">R18</span>}
+                {(s.noInfo || s.by) && (
+                  <span className="absolute bottom-1.5 left-1.5 max-w-[calc(100%-12px)] truncate rounded-md bg-black/60 px-1.5 py-0.5 text-[10px] text-white/90">{s.noInfo ? "生成情報なし" : `@${s.by}`}</span>
+                )}
               </button>
             ))}
           </div>
@@ -162,6 +168,24 @@ function Row({ label, mono = false, children }: { label: string; mono?: boolean;
 }
 
 function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: number; meta: Meta | null; onBack: () => void; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
+  return (
+    <div>
+      <button onClick={onBack} className="mb-3 text-xs text-accent">
+        <FontAwesomeIcon icon={faChevronLeft} /> 一覧へ
+      </button>
+      <img src={sampleImage(sample, "full", v)} alt="" className="mx-auto max-h-[50vh] rounded-xl object-contain" />
+      {sample.by && <p className="mt-3 text-[11px] text-muted">@{sample.by} さんの投稿 (作者の作例ではありません)</p>}
+      {sample.noInfo ? (
+        <p className="mt-3 rounded-lg bg-surface2 px-3 py-2 text-xs leading-relaxed">この作例には生成情報 (プロンプトや設定) が付いていないので、見るだけです</p>
+      ) : (
+        <SampleInfo sample={sample} meta={meta} onUse={onUse} />
+      )}
+    </div>
+  );
+}
+
+/** 作例の生成情報と、生成画面に入れるボタン */
+function SampleInfo({ sample, meta, onUse }: { sample: Sample; meta: Meta | null; onUse: (patch: Partial<GenerateParams>, skipped: string[]) => void }) {
   const params = [
     sample.width && `${sample.width}×${sample.height}`,
     sample.steps !== null && `${sample.steps}st`,
@@ -173,11 +197,7 @@ function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: n
   ].filter(Boolean);
   const prompts = { prompt: sample.prompt, negative: sample.negative };
   return (
-    <div>
-      <button onClick={onBack} className="mb-3 text-xs text-accent">
-        <FontAwesomeIcon icon={faChevronLeft} /> 一覧へ
-      </button>
-      <img src={sampleImage(sample, "full", v)} alt="" className="mx-auto max-h-[50vh] rounded-xl object-contain" />
+    <>
       <p className="mt-3 font-mono text-[11px] text-muted">{params.join(" · ")}</p>
       <div className="mt-3 mb-1.5 text-[11px] tracking-wider text-muted uppercase">Prompt</div>
       <PromptEditor value={sample.prompt} readOnly copyable />
@@ -202,6 +222,6 @@ function SampleDetail({ sample, v, meta, onBack, onUse }: { sample: Sample; v: n
         </button>
       </div>
       <p className="mt-2 text-[11px] text-muted">いまの Prompt / Negative を上書きします (Seed は変えません)</p>
-    </div>
+    </>
   );
 }

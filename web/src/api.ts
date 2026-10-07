@@ -118,6 +118,10 @@ export interface Sample {
   clipSkip: number | null;
   /** BFF に保存した画像 (無ければ Civitai から直接読む) */
   file?: string;
+  /** 生成情報が無い (見るだけ) */
+  noInfo?: true;
+  /** ほかの人の投稿なら投稿者 */
+  by?: string;
 }
 
 export interface RecommendView {

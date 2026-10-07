@@ -131,10 +131,12 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - Civitai の ID は `cm-info.json` の `VersionId` / `ModelId` (Civitai Helper の `civitai.info` なら `id` / `modelId`) から
   - 付随ファイルの無いモデルは、ファイルの SHA256 を計算して `/api/v1/model-versions/by-hash/{sha256}` で引く (数 GB を読むので Civitai の取得より後に回す)。結果は `data/model-hashes.json` に覚え、ファイルの大きさか更新日時が変わったら引き直す。Civitai に無かったものは 1 週間後に引き直す
   - Civitai から消えたモデル (404) は「消えています」と出し、取り直さない
-  - Civitai API の `/api/v1/model-versions/{id}` (バージョンの説明と作者の作例 最大 10 枚) と `/api/v1/models/{id}` (モデルの説明) を読む。`/api/v1/images` は 503 やメタ無しが多いので使わない
+  - Civitai API の `/api/v1/model-versions/{id}` (バージョンの説明と作者の作例 最大 10 枚) と `/api/v1/models/{id}` (モデルの説明) を読む
+  - 作例は `/api/v1/images?modelVersionId={id}&withMeta=true&nsfw=X&sort=Most Reactions` も読む (`withMeta=true` が無いと生成情報が返らず、`nsfw=X` が無いと全年齢のものしか返らない)。作者の作例に生成情報が無ければここから補い、生成情報のある作例が 10 枚に満たなければ、ほかの人の投稿から生成情報のあるものを足す。落ちていたら足さない
+  - 作例の集め方を変えたら版 (`samplesRev`) を上げる。古い版で取ったモデルは、推奨はそのままで作例だけ集め直す
   - 説明文 (HTML をテキストにして 12,000 字まで) と作例の設定の集計を Groq (`openai/gpt-oss-120b`、JSON モード) に渡して、推奨設定の JSON にしてもらう。Sampler / Scheduler は Forge の名前の一覧から選ばせる (無ければ原文のまま)
   - 結果は `data/recommended.json` に VersionId をキーにして保存し、LLM は最初の 1 回だけ呼ぶ。失敗したら 1 時間後に取り直す。シートの「再取得」で手で取り直せる (取得日も出す)
-  - 作例の画像も `data/recommend-images/{VersionId}/` に webp で保存する (長辺 1024 と、一覧用の幅 450)。画像を保存する前に取ったモデルは、画像だけ裏で落とす。保存できなかった画像は Civitai から直接読む
+  - 作例の画像も `data/recommend-images/{VersionId}/` に webp で保存する (長辺 1024 と、一覧用の幅 450)。保存できなかった画像は Civitai から直接読む
   - 取り直しに失敗したとき (Civitai から消えたときも) は、前に取ってあった推奨と作例を残して出す
   - Groq の API キーは環境変数 `GROQ_API_KEY` か `config.json` の `groqApiKey`。無ければ LLM は呼ばず、作例だけ取る
   - 429 (無料枠の上限) は `retry-after` だけ待ってから続ける
@@ -143,7 +145,7 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - Prompt / Negative と Params の各項目 (サイズ・Steps・CFG・Sampler・Scheduler) のラベルに (i) を出し、押すとそのモデルの推奨値を出す。推奨が無い項目には (i) を出さない。範囲を外れても警告はしない
   - プロンプト欄で `/quality` と打つとクオリティタグを、`/negative` と打つと推奨ネガティブを補完の候補に出す (まとめて 1 つと、1 タグずつ)
   - Checkpoint の下の「推奨と作例」でシートを開く: 推奨の一覧・そのほかの注意・Civitai へのリンク・作例
-- 作例: 作者の作例のうち生成情報のあるものを 2 列で並べる (画像は BFF に保存したもの)。R18 (nsfwLevel 4 以上) はぼかし、「R18 を表示」で外す (端末ごとに覚える)
+- 作例: 作者の作例と、足りないときのほかの人の投稿を 2 列で並べる (画像は BFF に保存したもの)。生成情報の無い作者の作例は「生成情報なし」と付けて見るだけにする。ほかの人の投稿には @投稿者 を付ける。R18 (nsfwLevel 4 以上) はぼかし、「R18 を表示」で外す (端末ごとに覚える)
   - タップで大きく出し、プロンプトと設定を見られる。「プロンプトを使う」で Prompt / Negative を上書き、「設定も使う」でサイズ・Steps・CFG・Sampler・Scheduler も上書きする (Seed は変えない)。いまのプロンプトが空でなければ確認してから
   - Sampler は Forge の名前に合わせる (`DPM++ 2M Karras` のような古い書き方は Sampler と Scheduler に分ける)。合わないものは変えずに一言出す
 
