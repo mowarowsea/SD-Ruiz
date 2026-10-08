@@ -260,3 +260,23 @@ input[type="number"]::-webkit-outer-spin-button {
   background: rgba(201, 155, 171, 0.35);
   border-radius: 2px;
 }
+
+/* スペースと改行 (web/src/prompt/whitespace.ts)。1 文字に 1 つ点を打つ */
+.pt-space {
+  background-image: radial-gradient(circle at 50% 55%, rgba(155, 138, 145, 0.55) 1.2px, transparent 1.6px);
+}
+.pt-wide-space {
+  box-shadow: inset 0 0 0 1px rgba(155, 138, 145, 0.45);
+  border-radius: 2px;
+}
+.pt-tab {
+  background: linear-gradient(rgba(155, 138, 145, 0.45), rgba(155, 138, 145, 0.45)) no-repeat center / calc(100% - 4px) 1px;
+}
+.pt-newline {
+  color: var(--color-muted);
+  opacity: 0.45;
+  font-size: 0.8em;
+  padding-left: 1px;
+  pointer-events: none;
+  user-select: none;
+}

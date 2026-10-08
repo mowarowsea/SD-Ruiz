@@ -8,6 +8,7 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { isUsed, promptCompletion, translateSelection, translationColumn } from "../prompt/complete";
 import { promptHighlight } from "../prompt/highlight";
 import { foldAll, promptStructure } from "../prompt/structure";
+import { showWhitespace } from "../prompt/whitespace";
 import { countTokens, loadTokenizer, onTokenizerReady } from "../prompt/tokens";
 
 const theme = EditorView.theme(
@@ -73,6 +74,7 @@ export function PromptEditor({
           placeholderExt(placeholder ?? ""),
           promptHighlight,
           promptStructure,
+          showWhitespace,
           translateSelection,
           autocompletion({ override: [promptCompletion], icons: false, activateOnTypingDelay: 0, addToOptions: [translationColumn], optionClass: (c) => `cm-opt-${c.type ?? ""}${isUsed(c) ? " cm-opt-used" : ""}` }),
           // 補完の候補が入力欄の枠で切れないように body 直下に出す
