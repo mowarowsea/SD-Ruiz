@@ -1,4 +1,4 @@
-import { faChevronRight, faMagnifyingGlass } from "@fortawesome/free-solid-svg-icons";
+import { faChevronRight, faMagnifyingGlass, faParagraph } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type Dispatch, type ReactNode, type SetStateAction, useEffect, useMemo, useRef, useState } from "react";
 import { api, baseLabel, baseSettingsOf, type ForgeStatus, type GenerateParams, type Lora, loadLoras, type Meta, type ModelKind, modelFolder, modelLabel, type Progress } from "../api";
@@ -15,6 +15,7 @@ import { RecommendTip, TipValue } from "../components/RecommendTip";
 import { ResultView } from "../components/ResultView";
 import { type useJob, type usePrefs, useRecommend } from "../hooks";
 import { setPromptPresets } from "../prompt/complete";
+import { setWhitespaceVisible, useWhitespaceVisible } from "../prompt/whitespace";
 
 export function GeneratePage({
   meta,
@@ -48,6 +49,7 @@ export function GeneratePage({
   const [sheet, setSheet] = useState<"checkpoint" | "lora" | "recommend" | null>(null);
   // Prompt / Negative の検索・置換。null なら閉じている
   const [find, setFind] = useState<string | null>(null);
+  const whitespaceVisible = useWhitespaceVisible();
   const usedLoras = useMemo(() => new Set(findLoras(form.prompt).map((u) => u.name)), [form.prompt]);
   const model = meta?.models.find((m) => m.title === form.checkpoint);
 
@@ -204,9 +206,14 @@ export function GeneratePage({
       <Label
         tip={rec?.quality ? <PromptTip text={rec.quality} command="/quality" /> : null}
         aside={
-          <button onClick={() => setFind((f) => (f === null ? "" : null))} aria-label="プロンプトを検索・置換" className={`px-1 text-xs ${find !== null ? "text-accent" : "text-muted"}`}>
-            <FontAwesomeIcon icon={faMagnifyingGlass} />
-          </button>
+          <>
+            <button onClick={() => setWhitespaceVisible(!whitespaceVisible)} aria-label="スペースと改行を表示" aria-pressed={whitespaceVisible} className={`px-1 text-xs ${whitespaceVisible ? "text-accent" : "text-muted"}`}>
+              <FontAwesomeIcon icon={faParagraph} />
+            </button>
+            <button onClick={() => setFind((f) => (f === null ? "" : null))} aria-label="プロンプトを検索・置換" className={`px-1 text-xs ${find !== null ? "text-accent" : "text-muted"}`}>
+              <FontAwesomeIcon icon={faMagnifyingGlass} />
+            </button>
+          </>
         }
       >
         Prompt

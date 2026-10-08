@@ -2,6 +2,7 @@
 
 import { RangeSetBuilder } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, MatchDecorator, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { useSyncExternalStore } from "react";
 
 const space = Decoration.mark({ class: "pt-space" });
 // 全角スペースは半角と見分けにくく、混ざると気付けないので枠で囲む
@@ -74,3 +75,34 @@ export const showWhitespace = [
     { decorations: (v) => v.decorations },
   ),
 ];
+
+// 表示のオンオフ。端末ごとの好みなので localStorage に置き、開いているすべての入力欄に一斉に効かせる
+const KEY = "sd-ruiz.showWhitespace";
+let enabled = (() => {
+  try {
+    return localStorage.getItem(KEY) !== "0";
+  } catch {
+    return true;
+  }
+})();
+const listeners = new Set<() => void>();
+
+export function setWhitespaceVisible(on: boolean) {
+  enabled = on;
+  try {
+    localStorage.setItem(KEY, on ? "1" : "0");
+  } catch {
+    /* 保存できなくても切り替えは効かせる */
+  }
+  listeners.forEach((l) => l());
+}
+
+export function useWhitespaceVisible() {
+  return useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => enabled,
+  );
+}
