@@ -207,7 +207,7 @@ export function GeneratePage({
         tip={rec?.quality ? <PromptTip text={rec.quality} command="/quality" /> : null}
         aside={
           <>
-            <button onClick={() => setWhitespaceVisible(!whitespaceVisible)} aria-label="スペースと改行を表示" aria-pressed={whitespaceVisible} className={`px-1 text-xs ${whitespaceVisible ? "text-accent" : "text-muted"}`}>
+            <button onClick={() => setWhitespaceVisible(!whitespaceVisible)} aria-label="スペースと改行を表示" aria-pressed={whitespaceVisible} className={`mr-4 px-1 text-xs ${whitespaceVisible ? "text-accent" : "text-muted"}`}>
               <FontAwesomeIcon icon={faParagraph} />
             </button>
             <button onClick={() => setFind((f) => (f === null ? "" : null))} aria-label="プロンプトを検索・置換" className={`px-1 text-xs ${find !== null ? "text-accent" : "text-muted"}`}>
