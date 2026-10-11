@@ -140,8 +140,10 @@ export function GeneratePage({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      // 高速化はオンのままにしておき、効かないモデル (SDXL 系以外) のときだけ送らない
-      await api.generate({ ...form, fast: form.fast && model?.arch === "sdxl" });
+      // 高速化と DMD2 はオンのままにしておき、効かないモデル (SDXL 系以外) のときだけ送らない。DMD2 中は高速化を重ねない
+      const sdxl = model?.arch === "sdxl";
+      const dmd2 = sdxl ? form.dmd2 : "off";
+      await api.generate({ ...form, dmd2, fast: form.fast && sdxl && dmd2 === "off" });
       await refresh();
       void reloadPrefs();
     } catch (e) {

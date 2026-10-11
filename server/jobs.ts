@@ -5,9 +5,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { ForgeClient, Txt2ImgRequest } from "./forge.js";
-
-/** forge-extensions/ruiz-spectrum のスクリプト名 */
-export const SPECTRUM_SCRIPT = "Spectrum (Ruiz)";
+import { applySpeed, type Dmd2Mode } from "./speed.js";
 
 export interface GenerateParams {
   checkpoint: string;
@@ -24,6 +22,8 @@ export interface GenerateParams {
   save: boolean;
   /** 高速化 (Spectrum (Ruiz) 拡張で、途中のステップの UNet を予測で済ませる)。SDXL 系だけ */
   fast: boolean;
+  /** DMD2 の LoRA で少ないステップで描く。Steps / CFG / Sampler / Scheduler はフォームの値の代わりに speed.ts の値を使う。SDXL 系だけ */
+  dmd2: Dmd2Mode;
 }
 
 export interface Job {
@@ -72,7 +72,10 @@ export class JobManager {
   /** 最後に画像ができたジョブ (中断でも 1 枚以上できていれば成功扱い) */
   private lastSuccess: Job | null = loadLast();
 
-  constructor(private readonly forge: ForgeClient) {}
+  constructor(
+    private readonly forge: ForgeClient,
+    private readonly dmd2Lora: string,
+  ) {}
 
   get current() {
     return this.job;
@@ -130,12 +133,10 @@ export class JobManager {
         grid_extended_filename: true,
       },
       override_settings_restore_afterwards: false,
-      // 引数は [有効, 予測の重み, 多項式の次数, 正則化, 何ステップに 1 回計算するか, その伸び方, 最初に必ず計算するステップ数, 最後に必ず計算する割合]
-      // ベンチマーク (2026-10-11、semiRealIllustrious 20 ステップ) で 1.27 倍速く、絵がほぼ変わらなかった設定
-      alwayson_scripts: p.fast ? { [SPECTRUM_SCRIPT]: { args: [true, 0.25, 6, 0.5, 2, 0, 6, 0.9] } } : {},
+      alwayson_scripts: {},
     };
     try {
-      const res = await this.forge.txt2img(req);
+      const res = await this.forge.txt2img(applySpeed(req, { fast: p.fast, dmd2: p.dmd2, dmd2Lora: this.dmd2Lora }));
       const info = JSON.parse(res.info) as { all_seeds?: number[]; all_prompts?: string[] };
       job.images = res.images.map((b64) => Buffer.from(b64, "base64"));
       job.seeds = info.all_seeds ?? [];

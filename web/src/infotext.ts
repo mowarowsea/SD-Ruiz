@@ -65,6 +65,18 @@ export function infotextToParams(info: Infotext, meta: Meta | null): Partial<Gen
   }
   // Spectrum (Ruiz) は生成情報に spec_w などを残す
   out.fast = p["spec_w"] !== undefined;
+  // DMD2 モードで作った画像は、BFF が足した LoRA を外して DMD2 モードに戻す。Steps などは DMD2 の値なので持ってこない
+  out.dmd2 = "off";
+  const lora = meta && new RegExp(String.raw`\s*<lora:${meta.dmd2.lora.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:([\d.]+)>`);
+  const m = lora && lora.exec(out.prompt ?? "");
+  if (lora && m) {
+    out.prompt = out.prompt!.replace(lora, "");
+    out.dmd2 = Number(m[1]) >= 0.9 ? "fast" : "balanced";
+    delete out.steps;
+    delete out.cfg;
+    delete out.sampler;
+    delete out.scheduler;
+  }
   if (p["Model"] && meta) {
     const m = meta.models.find((x) => modelLabel(x.title) === p["Model"]) ?? meta.models.find((x) => x.title.includes(p["Model"]));
     if (m) out.checkpoint = m.title;

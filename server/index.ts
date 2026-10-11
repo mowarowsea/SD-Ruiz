@@ -11,7 +11,8 @@ import { TagDictionary } from "./dictionary.js";
 import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./forge-doctor.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
-import { type GenerateParams, type Job, JobBusyError, JobManager, SPECTRUM_SCRIPT } from "./jobs.js";
+import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
+import { dmd2Presets, SPECTRUM_SCRIPT } from "./speed.js";
 import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.js";
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
@@ -21,7 +22,7 @@ import { Wildcards } from "./wildcards.js";
 
 const cfg = loadConfig();
 const forge = new ForgeClient(cfg.forgeUrl);
-const jobs = new JobManager(forge);
+const jobs = new JobManager(forge, cfg.dmd2Lora);
 const prefs = new PrefsStore();
 const recommend = new RecommendStore({ apiKey: cfg.groqApiKey, model: cfg.groqModel }, cfg.pinnedCivitaiUsers);
 const gallery = new Gallery(cfg.forgeUrl, {
@@ -134,6 +135,7 @@ server.get("/api/meta", async () => {
     }),
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
+    dmd2: { lora: cfg.dmd2Lora, presets: dmd2Presets },
   };
 });
 
@@ -461,6 +463,7 @@ const generateSchema = {
       batch: { type: "integer", minimum: 1, maximum: 8 },
       save: { type: "boolean", default: true },
       fast: { type: "boolean", default: false },
+      dmd2: { type: "string", enum: ["off", "fast", "balanced"], default: "off" },
     },
   },
 };
@@ -496,11 +499,18 @@ async function resolveModules(checkpoint: string): Promise<string[]> {
   return modules;
 }
 
-/** 高速化を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにするので、先に止めて分かる言葉にする */
-async function checkFast(checkpoint: string) {
-  const file = checkpointPaths.get(checkpoint);
+/** 高速化 / DMD2 を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにし、知らない LoRA は黙って無視するので、先に止めて分かる言葉にする */
+async function checkSpeed(p: GenerateParams) {
+  if (!p.fast && p.dmd2 === "off") return;
+  const file = checkpointPaths.get(p.checkpoint);
   const family = file ? familyOf(sidecars.get(file).base) : null;
-  if (archOf(family) !== "sdxl") throw new SetupError(`高速化は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
+  const what = p.dmd2 !== "off" ? "DMD2" : "高速化";
+  if (archOf(family) !== "sdxl") throw new SetupError(`${what}は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
+  if (p.dmd2 !== "off") {
+    if (!(await forge.loras()).some((l) => l.name === cfg.dmd2Lora))
+      throw new SetupError(`DMD2 の LoRA (${cfg.dmd2Lora}) が Forge にありません。models/Lora に置いて LoRA の一覧を再読込してください (別の名前なら config.json の dmd2Lora)`);
+    return;
+  }
   const { txt2img } = await forge.scripts();
   if (!txt2img.includes(SPECTRUM_SCRIPT.toLowerCase()))
     throw new SetupError("高速化に使う Forge の拡張 (Spectrum (Ruiz)) がありません。forge-extensions/ruiz-spectrum を Forge の extensions につないで、Forge を再起動してください");
@@ -508,7 +518,7 @@ async function checkFast(checkpoint: string) {
 
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {
   const modules = await resolveModules(req.body.checkpoint);
-  if (req.body.fast) await checkFast(req.body.checkpoint);
+  await checkSpeed(req.body);
   const job = jobs.start(req.body, modules);
   prefs.recordGenerate(req.body);
   return { id: job.id };

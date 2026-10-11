@@ -28,6 +28,8 @@ export interface Config {
   groqModel: string;
   /** 作例で必ず取る Civitai の投稿者 (どのモデルにも同じプロンプトで比較画像を上げてくれる人など)。作例の先頭に出す */
   pinnedCivitaiUsers: string[];
+  /** DMD2 モードで使う LoRA の名前 (Forge の LoRA 一覧の name) */
+  dmd2Lora: string;
 }
 
 const defaults: Config = {
@@ -46,6 +48,7 @@ const defaults: Config = {
   groqApiKey: null,
   groqModel: "openai/gpt-oss-120b",
   pinnedCivitaiUsers: ["Lizardon1025"],
+  dmd2Lora: "dmd2_sdxl_4step_lora_fp16",
 };
 
 // config.json (git 管理外) があれば defaults を上書きする

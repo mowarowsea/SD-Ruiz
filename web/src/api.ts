@@ -64,6 +64,18 @@ export interface Meta {
   models: Model[];
   samplers: string[];
   schedulers: { name: string; label: string }[];
+  /** DMD2 モードの LoRA と、モードごとに Forge へ送る値 (server/speed.ts) */
+  dmd2: { lora: string; presets: Record<Exclude<Dmd2Mode, "off">, Dmd2Preset> };
+}
+
+export type Dmd2Mode = "off" | "fast" | "balanced";
+
+export interface Dmd2Preset {
+  weight: number;
+  steps: number;
+  cfg: number;
+  sampler: string;
+  scheduler: string;
 }
 
 export interface GenerateParams {
@@ -80,6 +92,8 @@ export interface GenerateParams {
   batch: number;
   /** 高速化 (途中のステップの UNet を予測で済ませる。SDXL 系だけ) */
   fast: boolean;
+  /** DMD2 モード。Steps / CFG / Sampler / Scheduler はフォームの値の代わりに Meta.dmd2.presets の値で生成する。SDXL 系だけ */
+  dmd2: Dmd2Mode;
 }
 
 export interface Range {
