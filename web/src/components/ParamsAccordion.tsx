@@ -6,7 +6,7 @@ import { schedulerLabel as labelOf } from "../recommend";
 import { NumberField } from "./NumberField";
 import { RecommendTip, TipValue } from "./RecommendTip";
 
-type Params = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler" | "seed" | "batch" | "fast" | "dmd2">;
+type Params = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler" | "seed" | "batch" | "fast" | "dmd2" | "pag" | "apg">;
 
 /** DMD2 モードの選択肢と、いつ使うか */
 const dmd2Modes: { mode: Dmd2Mode; label: string; note: string }[] = [
@@ -37,10 +37,15 @@ export function ParamsAccordion({
   const sdxl = arch === "sdxl";
   // DMD2 中は Steps / CFG / Sampler / Scheduler をこちらの値で生成する
   const dmd2 = sdxl && value.dmd2 !== "off" ? (meta?.dmd2.presets[value.dmd2] ?? null) : null;
-  // DMD2 はステップが少なく高速化の省ける余地が無いので、重ねない
-  const fastUsable = sdxl && !dmd2;
-  const fastOn = value.fast && fastUsable;
-  const shown = dmd2 ?? value;
+  // DMD2 はステップが少なく高速化の省ける余地が無く、CFG も低いので PAG / APG も重ねない
+  const extrasUsable = sdxl && !dmd2;
+  const fastOn = value.fast && extrasUsable;
+  const pagOn = value.pag && extrasUsable;
+  const apgOn = value.apg && extrasUsable;
+  const apgCfg = meta?.apgCfg ?? 10;
+  // 実際に Forge へ送る値 (DMD2 / APG はフォームの値を差し替える)
+  const shown = dmd2 ?? { ...value, cfg: apgOn ? apgCfg : value.cfg };
+  const extrasNote = (note: string) => (!sdxl ? "SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でだけ使えます" : dmd2 ? "DMD2 と一緒には使えません" : note);
   const [open, setOpen] = useState(false);
   // 推奨の値。Forge にある名前ならタップでその値にできる
   const sizeTip = rec?.sizes.length ? (
@@ -100,10 +105,10 @@ export function ParamsAccordion({
           {value.width}×{value.height} · {shown.steps}st · CFG {shown.cfg} · {shown.sampler} · ×{value.batch}
         </span>
         {dmd2 && <span className="flex-none rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">DMD2</span>}
-        {fastOn && (
-          <span className="flex flex-none items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent" title="高速化オン">
-            <FontAwesomeIcon icon={faBolt} className="text-[10px]" />
-            高速
+        {(fastOn || pagOn || apgOn) && (
+          <span className="flex flex-none items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent">
+            {fastOn && <FontAwesomeIcon icon={faBolt} className="text-[10px]" title="高速化" />}
+            {[pagOn && "PAG", apgOn && "APG"].filter(Boolean).join("+")}
           </span>
         )}
         <SeedMark seed={value.seed} />
@@ -130,10 +135,13 @@ export function ParamsAccordion({
               DMD2 中は {dmd2.steps}st · CFG {dmd2.cfg} · {dmd2.sampler} · {labelOf(meta, dmd2.scheduler)} で生成します (下の値はオフにしたとき用)
             </div>
           )}
+          {apgOn && (
+            <div className="col-span-2 rounded-lg bg-accent/10 px-3 py-2 text-[11px] text-accent">APG 中は CFG {apgCfg} で生成します (下の CFG はオフにしたとき用)</div>
+          )}
           <Field label="Steps" tip={rangeTip("steps")} dim={!!dmd2}>
             <NumberField value={value.steps} onChange={(steps) => onChange({ steps })} min={1} max={150} ariaLabel="Steps" />
           </Field>
-          <Field label="CFG" tip={rangeTip("cfg")} dim={!!dmd2}>
+          <Field label="CFG" tip={rangeTip("cfg")} dim={!!dmd2 || apgOn}>
             <NumberField value={value.cfg} onChange={(cfg) => onChange({ cfg })} min={0} max={30} integer={false} ariaLabel="CFG" />
           </Field>
           <Field label="Sampler" tip={samplerTip} dim={!!dmd2}>
@@ -190,21 +198,48 @@ export function ParamsAccordion({
             </div>
             <div className="text-[11px] text-muted">{sdxl ? dmd2Modes.find((m) => m.mode === value.dmd2)?.note : "SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でだけ使えます"}</div>
           </div>
-          <label className={`col-span-2 flex items-start gap-2 ${fastUsable ? "" : "opacity-50"}`}>
-            <input type="checkbox" checked={fastOn} disabled={!fastUsable} onChange={(e) => onChange({ fast: e.target.checked })} className="mt-0.5 size-4 accent-accent" />
-            <span className="min-w-0">
-              <span className="text-sm">
+          <Toggle
+            label={
+              <>
                 <FontAwesomeIcon icon={faBolt} className="mr-1 text-xs text-accent" />
                 高速化
-              </span>
-              <span className="block text-[11px] text-muted">
-                {sdxl && value.dmd2 !== "off" ? "DMD2 と一緒には使えません" : "SDXL向け。ステップ数が多いほど大きくなります。(sd_forge_spectrum(改))"}
-              </span>
-            </span>
-          </label>
+              </>
+            }
+            note={extrasNote("SDXL向け。ステップ数が多いほど大きくなります。(sd_forge_spectrum(改))")}
+            checked={fastOn}
+            disabled={!extrasUsable}
+            onChange={(fast) => onChange({ fast })}
+          />
+          <Toggle
+            label="PAG"
+            note={extrasNote("プロンプトに従いやすく、くっきりする。約 1.4 倍遅い (Perturbed-Attention Guidance)")}
+            checked={pagOn}
+            disabled={!extrasUsable}
+            onChange={(pag) => onChange({ pag })}
+          />
+          <Toggle
+            label="APG"
+            note={extrasNote(`雰囲気を変える。淡く柔らかいトーンになる。CFG ${apgCfg} で生成 (Adaptive Projected Guidance)`)}
+            checked={apgOn}
+            disabled={!extrasUsable}
+            onChange={(apg) => onChange({ apg })}
+          />
         </div>
       )}
     </div>
+  );
+}
+
+/** チェックと、その下の一行の説明 (いつ使うか・中身が何か) */
+function Toggle({ label, note, checked, disabled, onChange }: { label: ReactNode; note: string; checked: boolean; disabled: boolean; onChange: (on: boolean) => void }) {
+  return (
+    <label className={`col-span-2 flex items-start gap-2 ${disabled ? "opacity-50" : ""}`}>
+      <input type="checkbox" checked={checked} disabled={disabled} onChange={(e) => onChange(e.target.checked)} className="mt-0.5 size-4 accent-accent" />
+      <span className="min-w-0">
+        <span className="text-sm">{label}</span>
+        <span className="block text-[11px] text-muted">{note}</span>
+      </span>
+    </label>
   );
 }
 

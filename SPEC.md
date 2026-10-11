@@ -57,6 +57,12 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
     - フォームの Steps / CFG / Sampler / Scheduler は変えず、BFF が Forge に送る直前に LoRA を足して値を差し替える (`server/speed.ts`)。オフにすれば元の値に戻る。DMD2 中はそれらの欄を薄くし、上に実際に使う値を出す。畳んだ要約も実際に使う値と「DMD2」を出す
     - LoRA は config の `dmd2Lora` (既定 `dmd2_sdxl_4step_lora_fp16`)。Forge に無ければ生成前にエラーにする
     - ギャラリーの設定を使うときは、プロンプトに DMD2 の LoRA があれば外して DMD2 をオン (重み 0.9 以上なら最速、それ未満なら Negative あり)。Steps などは DMD2 の値なので持ってこない
+  - 高速化の下に「PAG」と「APG」のチェック。CFG の押し方を変える誘導で、Forge の拡張 `forge-extensions/ruiz-guidance` (Guidance (Ruiz)) を生成ごとに `alwayson_scripts` で付ける。SDXL 系だけ。DMD2 中は使わない
+    - PAG: 説明は「プロンプトに従いやすく、くっきりする。約 1.4 倍遅い (Perturbed-Attention Guidance)」。middle ブロックの self-attention を崩した予測から離す。強さは 2 (3 だと陰影を描き込みすぎた)
+    - APG: 説明は「雰囲気を変える。淡く柔らかいトーンになる。CFG 10 で生成 (Adaptive Projected Guidance)」。CFG の押す向きのうち、色・明るさを焼く成分を捨てる。フォームの CFG は変えず、BFF が 10 に差し替える (APG 中は CFG の欄を薄くして、使う値を出す)
+    - 高速化・PAG・APG は重ねられる (Spectrum は PAG の追加の計算を予測に混ぜない)。オンのものは畳んだ要約に「⚡PAG+APG」のように出す
+    - ギャラリーの設定を使うときは、生成情報に `pag_scale` / `apg` があればオン。APG のときは CFG を持ってこない
+    - 2026-10-11 のベンチマーク (8 seed): PAG 2 は追従が上がった感触でトーンの変化も許容内。APG (CFG 10) は淡いトーンになり、雰囲気を変える機能としてはあり。WD14 tagger の採点では差が誤差の範囲だった
   - 生成ボタンは下部ナビの上に浮かせて固定する。スマホで入力欄にフォーカスがある (キーボードが出ている) 間は下部ナビと一緒に隠す (キーボードの上に重なって邪魔になるため)。下部ナビは低め
   - PC 向けに Ctrl+Enter (Mac は ⌘+Enter) でも生成する (プロンプト欄の中でも効く。シートを開いている間は効かない)
 - 数値は基本的に手打ちで入力する (スライダーは使わない)

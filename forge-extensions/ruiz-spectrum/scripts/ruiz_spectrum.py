@@ -6,6 +6,7 @@
 #   - 分けると 1 ステップが 2 つに数えられ、cond と uncond が混ざった予測になる
 #   - まとめた回 (バッチ 2) の予測を分けた回 (バッチ 1) に返して落ちる ("doesn't match the broadcast shape")
 # ここでは timestep が変わったときだけステップを進め、予測器を cond / uncond ごとに分ける。
+# Guidance (Ruiz) の PAG の追加の計算 (transformer_options の ruiz_perturbed) は素通しする。
 # まとめて計算されている間の動きは内蔵版と同じ。
 #
 # API (alwayson_scripts) の引数は内蔵版と同じ:
@@ -113,6 +114,9 @@ def patch(model, steps: int, w: float, m: int, lam: float, window_size: int, fle
 
     def wrapper(model_function, kwargs):
         x, timestep, c = kwargs["input"], kwargs["timestep"], kwargs["c"]
+        # Guidance (Ruiz) の PAG が同じステップでもう 1 回回す、わざと崩した計算。数えず、予測にも混ぜない
+        if c.get("transformer_options", {}).get("ruiz_perturbed"):
+            return model_function(x, timestep, **c)
         t = timestep[0].item() if isinstance(timestep, torch.Tensor) else float(timestep)
 
         if state["last_t"] is None or t > state["last_t"]:

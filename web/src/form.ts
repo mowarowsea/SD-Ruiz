@@ -15,6 +15,8 @@ export const defaultForm: GenerateParams = {
   batch: 1,
   fast: false,
   dmd2: "off",
+  pag: false,
+  apg: false,
 };
 
 /** ジョブの params (サーバー側の余分な項目つき) からフォームの項目だけを取り出す */

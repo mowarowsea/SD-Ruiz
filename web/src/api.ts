@@ -66,6 +66,8 @@ export interface Meta {
   schedulers: { name: string; label: string }[];
   /** DMD2 モードの LoRA と、モードごとに Forge へ送る値 (server/speed.ts) */
   dmd2: { lora: string; presets: Record<Exclude<Dmd2Mode, "off">, Dmd2Preset> };
+  /** APG のときに使う CFG */
+  apgCfg: number;
 }
 
 export type Dmd2Mode = "off" | "fast" | "balanced";
@@ -94,6 +96,10 @@ export interface GenerateParams {
   fast: boolean;
   /** DMD2 モード。Steps / CFG / Sampler / Scheduler はフォームの値の代わりに Meta.dmd2.presets の値で生成する。SDXL 系だけ */
   dmd2: Dmd2Mode;
+  /** PAG (プロンプトに従いやすく、くっきりする)。SDXL 系だけ。DMD2 中は使わない */
+  pag: boolean;
+  /** APG (CFG を Meta.apgCfg にして、淡く柔らかい雰囲気にする)。SDXL 系だけ。DMD2 中は使わない */
+  apg: boolean;
 }
 
 export interface Range {

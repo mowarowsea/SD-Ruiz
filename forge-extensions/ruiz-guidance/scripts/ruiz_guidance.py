@@ -32,6 +32,8 @@ def with_attn1_replace(model_options: dict, patch, block: tuple) -> dict:
     attn1[block] = patch
     replace["attn1"] = attn1
     to["patches_replace"] = replace
+    # Spectrum (Ruiz) はこの印を見て、PAG のわざと崩した計算を予測に混ぜない
+    to["ruiz_perturbed"] = True
     out = dict(model_options)
     out["transformer_options"] = to
     return out

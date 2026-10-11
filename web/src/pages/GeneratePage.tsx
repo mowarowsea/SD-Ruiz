@@ -140,10 +140,11 @@ export function GeneratePage({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      // 高速化と DMD2 はオンのままにしておき、効かないモデル (SDXL 系以外) のときだけ送らない。DMD2 中は高速化を重ねない
+      // 高速化 / DMD2 / PAG / APG はオンのままにしておき、効かないモデル (SDXL 系以外) のときだけ送らない。DMD2 中はほかを重ねない
       const sdxl = model?.arch === "sdxl";
       const dmd2 = sdxl ? form.dmd2 : "off";
-      await api.generate({ ...form, dmd2, fast: form.fast && sdxl && dmd2 === "off" });
+      const extras = sdxl && dmd2 === "off";
+      await api.generate({ ...form, dmd2, fast: form.fast && extras, pag: form.pag && extras, apg: form.apg && extras });
       await refresh();
       void reloadPrefs();
     } catch (e) {

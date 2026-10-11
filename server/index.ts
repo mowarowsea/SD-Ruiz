@@ -12,7 +12,7 @@ import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./f
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
-import { dmd2Presets, SPECTRUM_SCRIPT } from "./speed.js";
+import { APG_CFG, dmd2Presets, GUIDANCE_SCRIPT, SPECTRUM_SCRIPT } from "./speed.js";
 import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.js";
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
@@ -136,6 +136,7 @@ server.get("/api/meta", async () => {
     samplers: samplers.map((s) => s.name),
     schedulers: schedulers.map((s) => ({ name: s.name, label: s.label })),
     dmd2: { lora: cfg.dmd2Lora, presets: dmd2Presets },
+    apgCfg: APG_CFG,
   };
 });
 
@@ -464,6 +465,8 @@ const generateSchema = {
       save: { type: "boolean", default: true },
       fast: { type: "boolean", default: false },
       dmd2: { type: "string", enum: ["off", "fast", "balanced"], default: "off" },
+      pag: { type: "boolean", default: false },
+      apg: { type: "boolean", default: false },
     },
   },
 };
@@ -499,21 +502,24 @@ async function resolveModules(checkpoint: string): Promise<string[]> {
   return modules;
 }
 
-/** 高速化 / DMD2 を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにし、知らない LoRA は黙って無視するので、先に止めて分かる言葉にする */
+/** 高速化 / DMD2 / PAG / APG を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにし、知らない LoRA は黙って無視するので、先に止めて分かる言葉にする */
 async function checkSpeed(p: GenerateParams) {
-  if (!p.fast && p.dmd2 === "off") return;
+  const dmd2 = p.dmd2 !== "off";
+  if (!p.fast && !dmd2 && !p.pag && !p.apg) return;
   const file = checkpointPaths.get(p.checkpoint);
   const family = file ? familyOf(sidecars.get(file).base) : null;
-  const what = p.dmd2 !== "off" ? "DMD2" : "高速化";
-  if (archOf(family) !== "sdxl") throw new SetupError(`${what}は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
-  if (p.dmd2 !== "off") {
+  const what = [dmd2 && "DMD2", p.fast && "高速化", p.pag && "PAG", p.apg && "APG"].filter(Boolean).join(" / ");
+  if (archOf(family) !== "sdxl") throw new SetupError(`${what} は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
+  if (dmd2) {
     if (!(await forge.loras()).some((l) => l.name === cfg.dmd2Lora))
       throw new SetupError(`DMD2 の LoRA (${cfg.dmd2Lora}) が Forge にありません。models/Lora に置いて LoRA の一覧を再読込してください (別の名前なら config.json の dmd2Lora)`);
     return;
   }
   const { txt2img } = await forge.scripts();
-  if (!txt2img.includes(SPECTRUM_SCRIPT.toLowerCase()))
-    throw new SetupError("高速化に使う Forge の拡張 (Spectrum (Ruiz)) がありません。forge-extensions/ruiz-spectrum を Forge の extensions につないで、Forge を再起動してください");
+  const need = [p.fast && ["高速化", SPECTRUM_SCRIPT, "ruiz-spectrum"], (p.pag || p.apg) && ["PAG / APG", GUIDANCE_SCRIPT, "ruiz-guidance"]].filter((x): x is string[] => !!x);
+  for (const [label, script, dir] of need)
+    if (!txt2img.includes(script.toLowerCase()))
+      throw new SetupError(`${label}に使う Forge の拡張 (${script}) がありません。forge-extensions/${dir} を Forge の extensions につないで、Forge を再起動してください`);
 }
 
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {

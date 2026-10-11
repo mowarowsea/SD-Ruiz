@@ -24,6 +24,10 @@ export interface GenerateParams {
   fast: boolean;
   /** DMD2 の LoRA で少ないステップで描く。Steps / CFG / Sampler / Scheduler はフォームの値の代わりに speed.ts の値を使う。SDXL 系だけ */
   dmd2: Dmd2Mode;
+  /** PAG (プロンプトに従いやすく、くっきりする。約 1.4 倍遅い)。SDXL 系だけ。DMD2 中は使わない */
+  pag: boolean;
+  /** APG (CFG 10 で、淡く柔らかい雰囲気にする)。SDXL 系だけ。DMD2 中は使わない */
+  apg: boolean;
 }
 
 export interface Job {
@@ -136,7 +140,7 @@ export class JobManager {
       alwayson_scripts: {},
     };
     try {
-      const res = await this.forge.txt2img(applySpeed(req, { fast: p.fast, dmd2: p.dmd2, dmd2Lora: this.dmd2Lora }));
+      const res = await this.forge.txt2img(applySpeed(req, { fast: p.fast, dmd2: p.dmd2, pag: p.pag, apg: p.apg, dmd2Lora: this.dmd2Lora }));
       const info = JSON.parse(res.info) as { all_seeds?: number[]; all_prompts?: string[] };
       job.images = res.images.map((b64) => Buffer.from(b64, "base64"));
       job.seeds = info.all_seeds ?? [];

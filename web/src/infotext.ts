@@ -65,6 +65,10 @@ export function infotextToParams(info: Infotext, meta: Meta | null): Partial<Gen
   }
   // Spectrum (Ruiz) は生成情報に spec_w などを残す
   out.fast = p["spec_w"] !== undefined;
+  // Guidance (Ruiz) は生成情報に pag_scale / apg を残す。APG の CFG は APG 用の値なので持ってこない
+  out.pag = p["pag_scale"] !== undefined;
+  out.apg = p["apg"] !== undefined;
+  if (out.apg) delete out.cfg;
   // DMD2 モードで作った画像は、BFF が足した LoRA を外して DMD2 モードに戻す。Steps などは DMD2 の値なので持ってこない
   out.dmd2 = "off";
   const lora = meta && new RegExp(String.raw`\s*<lora:${meta.dmd2.lora.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}:([\d.]+)>`);
