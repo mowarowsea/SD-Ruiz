@@ -82,6 +82,16 @@ export const knowledge: Knowledge[] = [
     seen: ["2026-10-04: Anima・バッチ 2・Dynamic Prompts で [1, 1267, 1024] と [1, 1260, 1024]"],
   },
   {
+    id: "spectrum-cond-batch",
+    title: "Spectrum Integrated で生成に失敗",
+    level: "warn",
+    log: /output with shape \[1, 4, \d+, \d+\] doesn't match the broadcast shape \[2, 4, \d+, \d+\]/,
+    cause:
+      "内蔵の Spectrum (sd_forge_spectrum) は UNet の呼び出し 1 回を 1 ステップと数え、cond と uncond を同じ予測器に入れている。VRAM の空きしだいで Forge が cond / uncond をまとめたり分けたりすると、まとめた回 (バッチ 2) の予測を分けた回 (バッチ 1) に返して落ちる (Forge 側のバグ)。Forge は動き続ける",
+    remedy: "直した版の「Spectrum (Ruiz)」(forge-extensions/ruiz-spectrum) を使う",
+    seen: ["2026-10-11: semiRealIllustrious・960x1440 で、ベンチマークの初回に"],
+  },
+  {
     id: "port-in-use",
     title: "ポートが使用中 (二重起動)",
     level: "crash",
