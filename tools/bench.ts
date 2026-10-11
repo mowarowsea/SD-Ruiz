@@ -2,12 +2,12 @@
 // seed とプロンプトを固定して、設定違い (variant) ごとに生成し、時間・VRAM と画像の比較グリッドを残す。
 //
 //   npx tsx tools/bench.ts <spec.json> [--out <dir>]
-//   npx tsx tools/bench.ts --resummarize <出力 dir>   (グリッドと summary.md を作り直す)
+//   npx tsx tools/bench.ts --resummarize <出力 dir> [--score]   (グリッドと summary.md を作り直す。--score で採点もやり直す)
 //
 // spec.json:
 //   {
 //     "base": "last",              // "last" (data/last/job.json) か job.json のパス。Dynamic Prompts を展開済みのプロンプトと seed を使う
-//     "images": 2,                 // base の先頭から何枚使うか (省略で全部)
+//     "images": 2,                 // 何枚使うか (省略で base の枚数)。base より多いと、同じプロンプトで seed をずらして足す
 //     "repeat": 1,                 // 1 枚を何回測るか (時間の中央値をとる)
 //     "variants": [
 //       { "name": "baseline" },
@@ -26,9 +26,10 @@
 //   overrideSettings: override_settings に足す
 //
 // 出力 (既定は data/bench/<日時>/): 画像 <variant>_<i>.png、grid.jpg (列が variant、行が画像)、results.json、
-// summary.md (時間・先頭の variant との PSNR・VRAM)
+// scores.json (WD14 tagger での採点。tools/score/score.py)、summary.md (時間・先頭の variant との PSNR・採点・VRAM)
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
@@ -118,9 +119,12 @@ async function waitIdle() {
   }
 }
 
+/** base の枚数を超えた分は、同じプロンプトで seed をずらす */
+const seedOf = (base: BaseJob, i: number) => base.seeds[i % base.seeds.length] + Math.floor(i / base.seeds.length) * 7919;
+
 function buildRequest(base: BaseJob, v: Variant, i: number, steps?: number) {
   const p = { ...base.params, ...v.params };
-  let prompt = base.prompts[i];
+  let prompt = base.prompts[i % base.prompts.length];
   for (const [from, to] of v.promptReplace ?? []) prompt = prompt.split(from).join(to);
   if (v.promptAppend) prompt += v.promptAppend;
   return {
@@ -132,7 +136,7 @@ function buildRequest(base: BaseJob, v: Variant, i: number, steps?: number) {
     cfg_scale: p.cfg,
     sampler_name: p.sampler,
     scheduler: p.scheduler,
-    seed: base.seeds[i],
+    seed: seedOf(base, i),
     batch_size: 1,
     n_iter: 1,
     save_images: false,
@@ -187,6 +191,7 @@ async function main() {
     const dir = resolve(args[re + 1]);
     const saved = JSON.parse(readFileSync(join(dir, "results.json"), "utf8")) as { variant: Variant; runs: Run[] }[];
     await makeGrid(saved.map((s) => s.variant), saved.map((s) => s.runs), dir);
+    if (args.includes("--score")) score(dir);
     await writeSummary(dir, saved.map((s) => s.variant), saved.map((s) => s.runs));
     return;
   }
@@ -196,7 +201,7 @@ async function main() {
   const basePath = !spec.base || spec.base === "last" ? join(root, "data/last/job.json") : resolve(spec.base);
   const base = JSON.parse(readFileSync(basePath, "utf8")) as BaseJob;
   if (!base.prompts?.length || !base.seeds?.length) throw new Error(`${basePath} に展開済みのプロンプトと seed がありません`);
-  const count = Math.min(spec.images ?? base.prompts.length, base.prompts.length);
+  const count = spec.images ?? base.prompts.length;
   const repeat = spec.repeat ?? 1;
 
   const outIdx = args.indexOf("--out");
@@ -228,7 +233,7 @@ async function main() {
       writeFileSync(join(outDir, file), Buffer.from(image, "base64"));
       const run: Run = {
         image: i,
-        seed: base.seeds[i],
+        seed: seedOf(base, i),
         seconds: seconds.map((s) => Math.round(s * 100) / 100),
         peakAllocatedGB: Math.round(((mem.cuda?.allocated.peak ?? 0) / 2 ** 30) * 100) / 100,
         retries: mem.cuda?.events.retries ?? 0,
@@ -243,8 +248,26 @@ async function main() {
 
   await makeGrid(spec.variants, results, outDir);
   writeFileSync(join(outDir, "results.json"), JSON.stringify(spec.variants.map((v, c) => ({ variant: v, runs: results[c] })), null, 2));
+  score(outDir);
 
   await writeSummary(outDir, spec.variants, results);
+}
+
+const scorePython = join(root, "tools/score/.venv/Scripts/python.exe");
+
+/** WD14 tagger でプロンプトへの追従を採点して scores.json を作る (tools/score/score.py)。venv が無ければ飛ばす */
+function score(outDir: string) {
+  if (!existsSync(scorePython)) {
+    console.log("採点用の venv (tools/score/.venv) が無いので採点を飛ばします");
+    return;
+  }
+  console.log("\n採点中 (WD14 tagger)…");
+  const r = spawnSync(scorePython, [join(root, "tools/score/score.py"), outDir], { stdio: ["ignore", "inherit", "pipe"], encoding: "utf8" });
+  if (r.status !== 0) console.log(`採点に失敗しました: ${r.stderr.slice(-1000)}`);
+}
+
+interface Scores {
+  variants: { variant: string; posRecall: number | null; negHitRate: number | null; images: { negHit: string[]; posMissed: string[] }[] }[];
 }
 
 /** 先頭の variant の同じ画像との PSNR (dB)。縮小したグレースケールで比べる。高いほど近い (30 を超えると見た目はほぼ同じ) */
@@ -258,6 +281,9 @@ async function psnr(a: string, b: string) {
 }
 
 async function writeSummary(outDir: string, variants: Variant[], results: Run[][]) {
+  const scoresPath = join(outDir, "scores.json");
+  const scores = existsSync(scoresPath) ? (JSON.parse(readFileSync(scoresPath, "utf8")) as Scores) : null;
+  const pct = (x: number | null | undefined) => (x === null || x === undefined ? "-" : `${(x * 100).toFixed(1)}%`);
   const baseSec = median(results[0].map((r) => median(r.seconds)));
   const rows = await Promise.all(
     variants.map(async (v, c) => {
@@ -265,14 +291,35 @@ async function writeSummary(outDir: string, variants: Variant[], results: Run[][
       const last = results[c].at(-1)!;
       const ps = await Promise.all(results[c].map((r, i) => psnr(join(outDir, results[0][i].file), join(outDir, r.file))));
       const mean = c === 0 ? "-" : (ps.reduce((a, b) => a + b, 0) / ps.length).toFixed(1);
-      return `| ${v.name} | ${sec.toFixed(2)} | ×${(baseSec / sec).toFixed(2)} | ${mean} | ${last.peakAllocatedGB} | ${last.retries} | ${last.oom} |`;
+      const sc = scores?.variants[c];
+      return `| ${v.name} | ${sec.toFixed(2)} | ×${(baseSec / sec).toFixed(2)} | ${mean} | ${pct(sc?.posRecall)} | ${pct(sc?.negHitRate)} | ${last.peakAllocatedGB} / ${last.retries} / ${last.oom} |`;
     }),
   );
   const lines = [
-    `| variant | 秒/枚 (中央値) | 対 ${variants[0].name} | PSNR dB (対 ${variants[0].name}) | VRAM ピーク累計 GB | alloc retries | OOM |`,
+    `| variant | 秒/枚 (中央値) | 対 ${variants[0].name} | PSNR dB | Positive 一致率 | Negative 混入率 | VRAM GB / retries / OOM |`,
     "|---|---|---|---|---|---|---|",
     ...rows,
   ];
+  if (scores) {
+    // どのタグで差が付いたか: Negative に書いたのに出たタグと、先頭の variant では出ていたのに消えたタグ (何枚で起きたか)
+    const count = (lists: string[][]) => {
+      const m = new Map<string, number>();
+      for (const l of lists) for (const t of l) m.set(t, (m.get(t) ?? 0) + 1);
+      return [...m].sort((a, b) => b[1] - a[1]).map(([t, n]) => `${t}×${n}`);
+    };
+    const base = scores.variants[0].images;
+    lines.push("", `採点: WD14 tagger。PSNR は ${variants[0].name} との近さ (高いほど近い)`);
+    for (const sc of scores.variants) {
+      const neg = count(sc.images.map((im) => im.negHit));
+      const lost = count(sc.images.map((im, i) => im.posMissed.filter((t) => !base[i]?.posMissed.includes(t))));
+      const gained = count(sc.images.map((im, i) => (base[i]?.posMissed ?? []).filter((t) => !im.posMissed.includes(t))));
+      lines.push(``, `- **${sc.variant}**`, `  - Negative なのに出た: ${neg.slice(0, 15).join(", ") || "なし"}`);
+      if (sc !== scores.variants[0]) {
+        lines.push(`  - ${variants[0].name} より消えた: ${lost.slice(0, 15).join(", ") || "なし"}`);
+        lines.push(`  - ${variants[0].name} より出た: ${gained.slice(0, 15).join(", ") || "なし"}`);
+      }
+    }
+  }
   writeFileSync(join(outDir, "summary.md"), lines.join("\n") + "\n");
   console.log(`\n${lines.join("\n")}\n\n出力: ${outDir}`);
 }
