@@ -160,7 +160,7 @@ export function ParamsAccordion({
                 高速化
               </span>
               <span className="block text-[11px] text-muted">
-                {fastUsable ? "途中のステップの計算を予測で省き、約 1.3 倍速くします。絵はほぼ変わりません" : "SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でだけ使えます"}
+                SDXL向け。ステップ数が多いほど大きくなります。(sd_forge_spectrum(改))
               </span>
             </span>
           </label>

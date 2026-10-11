@@ -46,6 +46,7 @@ Forge Neo の Gradio UI を使わず、生成エンジンとしてだけ利用�
 - 生成画面: Prompt と Negative は常に表示 (Negative もよく使う)。Params (サイズ / Steps / CFG / Sampler / Scheduler / Seed / Batch) はほとんど変えないのでアコーディオンで畳む
   - 畳んだ状態の要約の右端に Seed が固定かランダムかを出す (鍵「固定」は色付きで目立たせる / サイコロ「ランダム」は控えめ)。絵文字は使わずアイコンで
   - Params の最後に「高速化」のチェック。オンなら、途中のステップの UNet を前のステップから予測して計算を省く (Forge の拡張 `forge-extensions/ruiz-spectrum`。内蔵の Spectrum を、cond / uncond を混ぜて落ちないように直したもの)。生成ごとに `alwayson_scripts` で付けるので Forge の再起動は要らない
+    - 説明文は「SDXL向け。ステップ数が多いほど大きくなります。(sd_forge_spectrum(改))」(詳しい説明より、いつ使うか・中身が何かが分かるように)
     - 20 ステップで約 1.27 倍速く、絵はほぼ変わらない (2026-10-11 のベンチマーク)
     - SDXL 系 (Illustrious / NoobAI / Pony / SDXL) だけ。それ以外のモデルではチェックを薄くして、オンのままでも送らない
     - オンのときは畳んだ要約に稲妻「高速」を出す。最後の生成の設定として残る。ギャラリーの設定を使うときは、生成情報に `spec_w` があればオン
