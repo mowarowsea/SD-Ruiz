@@ -13,6 +13,7 @@ export const defaultForm: GenerateParams = {
   scheduler: "automatic",
   seed: -1,
   batch: 1,
+  fast: false,
 };
 
 /** ジョブの params (サーバー側の余分な項目つき) からフォームの項目だけを取り出す */

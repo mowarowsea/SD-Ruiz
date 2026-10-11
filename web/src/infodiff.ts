@@ -8,7 +8,8 @@ export type Change =
   | { kind: "prompt" | "negative"; added: string[]; removed: string[]; reweighted: { tag: string; from: string; to: string }[] };
 
 // 毎回変わるもの・比べても意味のないもの
-const ignoredParam = /^Seed$|hash|Version|Template|Source Identifier/i;
+// 高速化 (Spectrum) の設定は 7 つ並ぶので、オンオフが分かる spec_window_size だけ比べる
+const ignoredParam = /^Seed$|hash|Version|Template|Source Identifier|^spec_(?!window_size$)/i;
 
 /** 片側だけ残った括弧を外す (「(a, b:1.1)」をカンマで切ると「(a」「b:1.1)」になるため) */
 function trimBrackets(t: string) {

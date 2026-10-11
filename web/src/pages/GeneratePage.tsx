@@ -140,7 +140,8 @@ export function GeneratePage({
     setSubmitError(null);
     setSubmitting(true);
     try {
-      await api.generate(form);
+      // 高速化はオンのままにしておき、効かないモデル (SDXL 系以外) のときだけ送らない
+      await api.generate({ ...form, fast: form.fast && model?.arch === "sdxl" });
       await refresh();
       void reloadPrefs();
     } catch (e) {
@@ -226,7 +227,7 @@ export function GeneratePage({
       <PromptEditor value={form.negative} onChange={(negative) => patch({ negative })} placeholder="lowres, bad anatomy, ..." minHeight="6rem" highlight={find ?? ""} />
 
       <div className="mt-4">
-        <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} rec={rec} />
+        <ParamsAccordion value={form} onChange={patch} meta={meta} lastSeed={lastSeed} rec={rec} arch={model?.arch ?? null} />
       </div>
 
       {/* 生成ボタン (下部ナビの上に浮かせる。スマホで文字を打っている間は、キーボードと一緒にせり上がらないよう下部ナビと一緒に隠す) */}

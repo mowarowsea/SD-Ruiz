@@ -63,6 +63,8 @@ export function infotextToParams(info: Infotext, meta: Meta | null): Partial<Gen
     const s = meta?.schedulers.find((x) => x.label === p["Schedule type"] || x.name === p["Schedule type"]);
     if (s) out.scheduler = s.name;
   }
+  // Spectrum (Ruiz) は生成情報に spec_w などを残す
+  out.fast = p["spec_w"] !== undefined;
   if (p["Model"] && meta) {
     const m = meta.models.find((x) => modelLabel(x.title) === p["Model"]) ?? meta.models.find((x) => x.title.includes(p["Model"]));
     if (m) out.checkpoint = m.title;

@@ -6,6 +6,9 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync
 import { fileURLToPath } from "node:url";
 import type { ForgeClient, Txt2ImgRequest } from "./forge.js";
 
+/** forge-extensions/ruiz-spectrum のスクリプト名 */
+export const SPECTRUM_SCRIPT = "Spectrum (Ruiz)";
+
 export interface GenerateParams {
   checkpoint: string;
   prompt: string;
@@ -19,6 +22,8 @@ export interface GenerateParams {
   seed: number;
   batch: number;
   save: boolean;
+  /** 高速化 (Spectrum (Ruiz) 拡張で、途中のステップの UNet を予測で済ませる)。SDXL 系だけ */
+  fast: boolean;
 }
 
 export interface Job {
@@ -125,6 +130,9 @@ export class JobManager {
         grid_extended_filename: true,
       },
       override_settings_restore_afterwards: false,
+      // 引数は [有効, 予測の重み, 多項式の次数, 正則化, 何ステップに 1 回計算するか, その伸び方, 最初に必ず計算するステップ数, 最後に必ず計算する割合]
+      // ベンチマーク (2026-10-11、semiRealIllustrious 20 ステップ) で 1.27 倍速く、絵がほぼ変わらなかった設定
+      alwayson_scripts: p.fast ? { [SPECTRUM_SCRIPT]: { args: [true, 0.25, 6, 0.5, 2, 0, 6, 0.9] } } : {},
     };
     try {
       const res = await this.forge.txt2img(req);

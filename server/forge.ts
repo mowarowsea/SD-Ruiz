@@ -49,6 +49,7 @@ export interface Txt2ImgRequest {
   save_images: boolean;
   override_settings: Record<string, unknown>;
   override_settings_restore_afterwards: boolean;
+  alwayson_scripts: Record<string, { args: unknown[] }>;
 }
 
 export interface Txt2ImgResponse {
@@ -127,6 +128,11 @@ export class ForgeClient {
   /** 「VAE / Text Encoder」に選べるファイル (models/VAE と models/text_encoder)。Forge は起動時にしか読み直さない */
   modules() {
     return this.get<{ model_name: string; filename: string }[]>("/sdapi/v1/sd-modules");
+  }
+
+  /** 使えるスクリプトの名前 (小文字)。拡張は Forge の起動時にしか読まれない */
+  scripts() {
+    return this.get<{ txt2img: string[] }>("/sdapi/v1/scripts");
   }
 
   /** モデルのフォルダを読み直してもらう (ファイルを消したあとなど) */

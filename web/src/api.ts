@@ -78,6 +78,8 @@ export interface GenerateParams {
   scheduler: string;
   seed: number;
   batch: number;
+  /** 高速化 (途中のステップの UNet を予測で済ませる。SDXL 系だけ) */
+  fast: boolean;
 }
 
 export interface Range {

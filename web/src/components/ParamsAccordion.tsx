@@ -1,4 +1,4 @@
-import { faDice, faLock } from "@fortawesome/free-solid-svg-icons";
+import { faBolt, faDice, faLock } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type ReactNode, useState } from "react";
 import { formatRange, type GenerateParams, type Meta, type Recommendation } from "../api";
@@ -6,7 +6,7 @@ import { schedulerLabel as labelOf } from "../recommend";
 import { NumberField } from "./NumberField";
 import { RecommendTip, TipValue } from "./RecommendTip";
 
-type Params = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler" | "seed" | "batch">;
+type Params = Pick<GenerateParams, "width" | "height" | "steps" | "cfg" | "sampler" | "scheduler" | "seed" | "batch" | "fast">;
 
 /** ほとんど触らないパラメータ。畳んだ状態では 1 行の要約だけ見せる */
 export function ParamsAccordion({
@@ -15,6 +15,7 @@ export function ParamsAccordion({
   meta,
   lastSeed,
   rec,
+  arch,
 }: {
   value: Params;
   onChange: (patch: Partial<Params>) => void;
@@ -22,7 +23,12 @@ export function ParamsAccordion({
   lastSeed: number | null;
   /** いまのモデルの推奨 (ラベルの (i) で出す。値は勝手に変えない) */
   rec: Recommendation | null;
+  /** いまのモデルの構造 (高速化は sdxl だけ) */
+  arch: string | null;
 }) {
+  // 高速化は SDXL 系でしか確かめていない。オンのまま別のモデルにしたときは、効かないことが分かるよう薄くする
+  const fastUsable = arch === "sdxl";
+  const fastOn = value.fast && fastUsable;
   const [open, setOpen] = useState(false);
   // 推奨の値。Forge にある名前ならタップでその値にできる
   const sizeTip = rec?.sizes.length ? (
@@ -81,6 +87,12 @@ export function ParamsAccordion({
         <span className="min-w-0 flex-1 truncate text-right font-mono text-xs text-muted">
           {value.width}×{value.height} · {value.steps}st · CFG {value.cfg} · {value.sampler} · ×{value.batch}
         </span>
+        {fastOn && (
+          <span className="flex flex-none items-center gap-1 rounded-full bg-accent/15 px-2 py-0.5 text-[11px] text-accent" title="高速化オン">
+            <FontAwesomeIcon icon={faBolt} className="text-[10px]" />
+            高速
+          </span>
+        )}
         <SeedMark seed={value.seed} />
         <span className={`text-muted transition-transform ${open ? "rotate-180" : ""}`}>▾</span>
       </button>
@@ -140,6 +152,18 @@ export function ParamsAccordion({
           <Field label="Batch">
             <NumberField value={value.batch} onChange={(batch) => onChange({ batch })} min={1} max={8} ariaLabel="Batch" />
           </Field>
+          <label className={`col-span-2 flex items-start gap-2 ${fastUsable ? "" : "opacity-50"}`}>
+            <input type="checkbox" checked={fastOn} disabled={!fastUsable} onChange={(e) => onChange({ fast: e.target.checked })} className="mt-0.5 size-4 accent-accent" />
+            <span className="min-w-0">
+              <span className="text-sm">
+                <FontAwesomeIcon icon={faBolt} className="mr-1 text-xs text-accent" />
+                高速化
+              </span>
+              <span className="block text-[11px] text-muted">
+                {fastUsable ? "途中のステップの計算を予測で省き、約 1.3 倍速くします。絵はほぼ変わりません" : "SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でだけ使えます"}
+              </span>
+            </span>
+          </label>
         </div>
       )}
     </div>

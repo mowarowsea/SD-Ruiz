@@ -11,7 +11,7 @@ import { TagDictionary } from "./dictionary.js";
 import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./forge-doctor.js";
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
-import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
+import { type GenerateParams, type Job, JobBusyError, JobManager, SPECTRUM_SCRIPT } from "./jobs.js";
 import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.js";
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
@@ -460,6 +460,7 @@ const generateSchema = {
       seed: { type: "integer", minimum: -1 },
       batch: { type: "integer", minimum: 1, maximum: 8 },
       save: { type: "boolean", default: true },
+      fast: { type: "boolean", default: false },
     },
   },
 };
@@ -495,8 +496,20 @@ async function resolveModules(checkpoint: string): Promise<string[]> {
   return modules;
 }
 
+/** 高速化を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにするので、先に止めて分かる言葉にする */
+async function checkFast(checkpoint: string) {
+  const file = checkpointPaths.get(checkpoint);
+  const family = file ? familyOf(sidecars.get(file).base) : null;
+  if (archOf(family) !== "sdxl") throw new SetupError(`高速化は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
+  const { txt2img } = await forge.scripts();
+  if (!txt2img.includes(SPECTRUM_SCRIPT.toLowerCase()))
+    throw new SetupError("高速化に使う Forge の拡張 (Spectrum (Ruiz)) がありません。forge-extensions/ruiz-spectrum を Forge の extensions につないで、Forge を再起動してください");
+}
+
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {
-  const job = jobs.start(req.body, await resolveModules(req.body.checkpoint));
+  const modules = await resolveModules(req.body.checkpoint);
+  if (req.body.fast) await checkFast(req.body.checkpoint);
+  const job = jobs.start(req.body, modules);
   prefs.recordGenerate(req.body);
   return { id: job.id };
 });
