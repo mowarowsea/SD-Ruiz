@@ -154,11 +154,11 @@ export function useTyping() {
     };
     const onFocusOut = (e: FocusEvent) => {
       if (!editable(e.target) || editable(e.relatedTarget)) return;
-      closeUntil = Date.now() + 500;
+      closeUntil = Date.now() + 300;
       // focusout の最中は activeElement がまだ切り替わっていないことがあるので、一呼吸おいてから見る
       window.setTimeout(update);
       // 期限が切れたらすぐ見直す (定期の見直しを待つと、最大でその間隔ぶん遅れる)
-      window.setTimeout(update, 510);
+      window.setTimeout(update, 310);
     };
     const onVisible = () => document.visibilityState === "visible" && update();
 
