@@ -115,7 +115,10 @@ export function useTyping() {
     if (!matchMedia("(pointer: coarse)").matches) return;
     const height = () => window.visualViewport?.height ?? window.innerHeight;
     let width = window.innerWidth;
-    let base = height(); // キーボードが出ていないときの高さ (見た中でいちばん高いもの。画面の向きが変わったら測り直す)
+    // キーボードが出ていないときの高さ。入力していない間は今の高さをそのまま使い、入力中は見た中でいちばん高いものを使う。
+    // 「これまでに見たいちばん高いもの」をずっと持ち続けると、アドレスバーやナビゲーションバーの出入りなどで
+    // 一度だけ高くなったときの値が残り、キーボードを閉じても「まだ出ている」と見て生成ボタンが戻るのが遅れる
+    let base = height();
     let openUntil = 0; // 入力欄に触れてから、キーボードが上がりきるのを待つ期限
     let closeUntil = 0; // 入力欄から離れてから、キーボードが閉じきるのを待つ期限
     const editable = (t: EventTarget | null) => t instanceof Element && !!t.closest(EDITABLE);
@@ -133,10 +136,11 @@ export function useTyping() {
         base = 0;
       }
       const h = height();
-      if (h > base) base = h;
       const now = Date.now();
+      const focused = editable(document.activeElement);
+      if (h > base || (!focused && now >= closeUntil)) base = h;
       const open = keyboardOpen();
-      if (editable(document.activeElement)) setTyping(open || now < openUntil);
+      if (focused) setTyping(open || now < openUntil);
       else setTyping(open && now < closeUntil);
     };
 
@@ -150,7 +154,7 @@ export function useTyping() {
     };
     const onFocusOut = (e: FocusEvent) => {
       if (!editable(e.target) || editable(e.relatedTarget)) return;
-      closeUntil = Date.now() + 1000;
+      closeUntil = Date.now() + 700;
       // focusout の最中は activeElement がまだ切り替わっていないことがあるので、一呼吸おいてから見る
       window.setTimeout(update);
     };
