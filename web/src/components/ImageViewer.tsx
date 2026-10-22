@@ -13,11 +13,15 @@ import { type PointerEvent, type ReactNode, type TouchEvent, useEffect, useLayou
  * **払う動きはブラウザに任せる** — 指を自前で追うと、ブラウザがスクロールとして引き取った時点で
  * pointercancel が来て何も起きない。勢いよく払っても 1 枚で止まる (scroll-snap-stop: always)
  *
- * loop: 端まで行ったら反対側に戻る (生成結果用)。端から更に払っても戻る。ギャラリーのように続きを読み込む一覧では false にする
+ * loop: 端まで行ったら反対側に戻る (生成結果用)。ギャラリーのように続きを読み込む一覧では false にする。
+ *   両端に反対側の複製のマスを置き (終端の複製・全部・始端の複製)、払えばそのまま反対側の絵が出てくる。
+ *   複製のマスに止まったら、同じ絵の本物のマスへ黙って飛び移る。枚数が少ないので絵は全部読んでおく
  * placeholders: 元画像を読み込むまで下に敷いておく画像 (サムネイル)
  * overlay: 画像の上に重ねる操作バーなど (タップ領域より手前に出る)
  * showCounter: 上部に「1 / 3」を出す (続きを読み込む一覧では件数に意味がないので消す)
  */
+const hasScrollEnd = "onscrollend" in window;
+
 export function ImageViewer({
   images,
   index,
@@ -46,6 +50,10 @@ export function ImageViewer({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const stage = useRef<HTMLDivElement>(null);
+  // マスごとに何枚目の画像を出すか。ring のときは先頭と末尾が反対側の複製
+  const ring = loop && count > 1;
+  const pad = ring ? 1 : 0;
+  const cells = ring ? [count - 1, ...images.keys(), 0] : [...images.keys()];
   const cellAt = () => {
     const s = stage.current;
     return s ? Math.round(s.scrollLeft / Math.max(1, s.clientWidth)) : index;
@@ -76,26 +84,56 @@ export function ImageViewer({
   });
 
   // タップ・キーで index が変わったら、そのマスへ一気に飛ぶ (今までどおり)。
-  // 払って変わったときは既にそのマスにいるので何もしない (開いた直後は描く前に合わせる)
+  // 払って変わったときは既にそのマス (か複製のマス) にいるので何もしない。開いた直後は描く前に本物のマスへ合わせる
+  const opened = useRef(false);
   useLayoutEffect(() => {
     const s = stage.current;
-    if (s && cellAt() !== index) s.scrollTo({ left: index * s.clientWidth, behavior: "instant" });
+    if (!s) return;
+    if (!opened.current || cells[cellAt()] !== index) s.scrollTo({ left: (index + pad) * s.clientWidth, behavior: "instant" });
+    opened.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, count]);
 
   // 画面が回るとマスの幅が変わり、同じ scrollLeft が別のマスを指すので、見ていたマスへ戻す
-  const indexRef = useRef(index);
-  indexRef.current = index;
+  const at = useRef({ index, pad });
+  at.current = { index, pad };
   useEffect(() => {
-    const onResize = () => stage.current?.scrollTo({ left: indexRef.current * stage.current.clientWidth, behavior: "instant" });
+    const onResize = () => stage.current?.scrollTo({ left: (at.current.index + at.current.pad) * stage.current.clientWidth, behavior: "instant" });
     addEventListener("resize", onResize);
     return () => removeEventListener("resize", onResize);
   }, []);
 
   const onScroll = () => {
-    const at = cellAt();
-    if (at !== index && at >= 0 && at < count) onIndex(at);
+    const i = cells[cellAt()];
+    if (i !== undefined && i !== index) onIndex(i);
+    if (!hasScrollEnd) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(settle, 150);
+    }
   };
+
+  /**
+   * 止まった。複製のマスなら本物のマスへ飛び移る (絵は同じなので見た目は変わらない)。
+   * 指で押さえている間は飛ばない (scrollend が無いブラウザは scroll が途切れたら止まったとみなすので、押さえて止めただけのこともある)
+   */
+  const touching = useRef(false);
+  const settleTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const settle = () => {
+    const s = stage.current;
+    const c = cellAt();
+    if (!s || !ring || touching.current || (c !== 0 && c !== count + 1)) return;
+    s.scrollTo({ left: (cells[c] + pad) * s.clientWidth, behavior: "instant" });
+  };
+  const settleRef = useRef(settle);
+  settleRef.current = settle;
+  useEffect(() => {
+    const s = stage.current;
+    if (!s || !hasScrollEnd) return;
+    const onEnd = () => settleRef.current();
+    s.addEventListener("scrollend", onEnd);
+    return () => s.removeEventListener("scrollend", onEnd);
+  }, []);
+  useEffect(() => () => clearTimeout(settleTimer.current), []);
 
   /**
    * 押した時の扱い。**なぞった時は何もしない** (払って送った)。
@@ -117,22 +155,12 @@ export function ImageViewer({
     else step(z);
   };
 
-  /**
-   * 端のマスから更に外へ払った。スクロールはもう動かないので、指の動きだけ見て反対の端へ戻る (loop のとき)。
-   * touchend はスクロールに引き取られても来る
-   */
-  const edge = useRef<number | null>(null);
-  const onTouchStart = (e: TouchEvent) => {
-    const at = cellAt();
-    edge.current = loop && count > 1 && e.touches.length === 1 && (at === 0 || at === count - 1) ? e.touches[0].clientX : null;
-  };
-  const onTouchEnd = (e: TouchEvent) => {
-    if (edge.current === null) return;
-    const dx = e.changedTouches[0].clientX - edge.current;
-    edge.current = null;
-    const at = cellAt();
-    if (dx < -60 && at === count - 1) onIndex(0);
-    else if (dx > 60 && at === 0) onIndex(count - 1);
+  const onTouch = (e: TouchEvent) => {
+    touching.current = e.touches.length > 0;
+    if (!touching.current && !hasScrollEnd) {
+      clearTimeout(settleTimer.current);
+      settleTimer.current = setTimeout(settle, 150);
+    }
   };
 
   const imgClass = "pointer-events-none absolute inset-0 size-full object-contain";
@@ -151,17 +179,18 @@ export function ImageViewer({
           const z = count > 1 ? zone(e.clientX) : 0;
           e.currentTarget.style.cursor = z < 0 ? "w-resize" : z > 0 ? "e-resize" : "zoom-out";
         }}
-        onTouchStart={onTouchStart}
-        onTouchEnd={onTouchEnd}
+        onTouchStart={onTouch}
+        onTouchEnd={onTouch}
+        onTouchCancel={onTouch}
         onDragStart={(e) => e.preventDefault()}
       >
-        {/* マスは全部置くが、絵を入れるのは見ている画像と両隣だけ (ギャラリーは何百枚にもなる) */}
-        {images.map((src, i) => (
-          <div key={i} className="relative h-full w-full shrink-0 snap-start snap-always">
-            {Math.abs(i - index) <= 1 && (
+        {/* マスは全部置くが、絵を入れるのは見ている画像と両隣だけ (ギャラリーは何百枚にもなる。ring のときは全部) */}
+        {cells.map((i, c) => (
+          <div key={c} className="relative h-full w-full shrink-0 snap-start snap-always">
+            {(ring || Math.abs(i - index) <= 1) && (
               <>
                 {placeholders?.[i] && <img src={placeholders[i]} alt="" className={imgClass} draggable={false} />}
-                <img key={src} src={src} alt={`画像 ${i + 1}`} className={imgClass} draggable={false} />
+                <img key={images[i]} src={images[i]} alt={`画像 ${i + 1}`} className={imgClass} draggable={false} />
               </>
             )}
           </div>
