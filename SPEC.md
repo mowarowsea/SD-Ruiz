@@ -304,6 +304,8 @@ Civitai の説明文に書かれた推奨設定 (Steps / CFG / Sampler など) �
   - `groqApiKey` / `groqModel`: 推奨設定の抽出に使う Groq (キーは環境変数 `GROQ_API_KEY` でもよい。モデルの既定は `openai/gpt-oss-120b`)
   - `pinnedCivitaiUsers`: 作例で必ず取って先頭に出す Civitai の投稿者 (既定 `["Lizardon1025"]`)
 - 配信は `@fastify/compress` で圧縮する (Tailscale 越しのスマホ向け)
+- テスト: vitest (`npm test`)。BFF は `server/*.test.ts`、フロントは `web/src/**/*.test.ts` で、DOM の要らないロジック (プロンプトの解析・検索置換・トークン数・infotext・生成情報の差分・推奨の整形・高速化の差し替え・Forge の診断・ワイルドカード・ギャラリーの grid と元画像の対応と保管庫への出し入れ・prefs・辞書) を対象にする。CodeMirror と React の描画は対象外
+  - ファイルを触るものは一時フォルダに作る。`data/` と `config.json` を読み書きするモジュールは `server/test-fs.ts` で node:fs をメモリ上に差し替える (本物には触らない)。ギャラリーは小さな `iib.db` を `node:sqlite` で作る
 
 ## 5. 未決事項
 - デザインの方向性 (モックアップで確認する)
