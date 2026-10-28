@@ -56,13 +56,15 @@ function tagDiff(kind: "prompt" | "negative", cur: string, prev: string): Change
   const b = tags(prev);
   let added = [...a].filter((t) => !b.has(t));
   let removed = [...b].filter((t) => !a.has(t));
-  // 重みだけ変えたものは 1 つにまとめる
+  // 重みだけ変えたものは 1 つにまとめる。書き方が違うだけで重みが同じもの ("b:1.1)" と "(b:1.1)") は変えていない
   const reweighted: { tag: string; from: string; to: string }[] = [];
   for (const t of added) {
     const w = weighted(t);
     const r = removed.find((x) => weighted(x).tag === w.tag);
     if (!r) continue;
-    reweighted.push({ tag: w.tag, from: fmt(weighted(r).weight), to: fmt(w.weight) });
+    const from = fmt(weighted(r).weight);
+    const to = fmt(w.weight);
+    if (from !== to) reweighted.push({ tag: w.tag, from, to });
     removed = removed.filter((x) => x !== r);
     added = added.filter((x) => x !== t);
   }
