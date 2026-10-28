@@ -4,7 +4,7 @@ Stable Diffusion WebUI Forge Neo を生成エンジンとして使う、スマ�
 
 名前の由来は、世界一多作な画家 Pablo **Ruiz** Picasso から。
 
-> 🚧 設計中。仕様は [SPEC.md](SPEC.md) を参照。
+仕様は [SPEC.md](SPEC.md)、開発の決まりごとは [CLAUDE.md](CLAUDE.md)。
 
 ## 使い方
 

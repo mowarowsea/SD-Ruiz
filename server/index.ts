@@ -12,10 +12,11 @@ import { analyze, currentWarnings, exitedSinceLastStart, windowsInfo } from "./f
 import { ForgeClient, ForgeError } from "./forge.js";
 import { Gallery, type Kind } from "./gallery.js";
 import { type GenerateParams, type Job, JobBusyError, JobManager } from "./jobs.js";
-import { APG_CFG, dmd2Presets, GUIDANCE_SCRIPT, SPECTRUM_SCRIPT } from "./speed.js";
-import { archNeedsModules, archOf, builtinBaseSettings, familyOf } from "./base.js";
+import { APG_CFG, dmd2Presets } from "./speed.js";
+import { archOf, builtinBaseSettings, familyOf } from "./base.js";
 import { Launcher } from "./launcher.js";
 import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
+import { precheck, type PrecheckDeps } from "./precheck.js";
 import { type ModelParams, PrefsStore } from "./prefs.js";
 import { RecommendStore, sampleImagePath } from "./recommend.js";
 import { Wildcards } from "./wildcards.js";
@@ -471,60 +472,20 @@ const generateSchema = {
   },
 };
 
-/** 設定が足りなくて生成できないとき (400 で返す) */
-class SetupError extends Error {
-  readonly statusCode = 400;
-}
-
-/**
- * このモデルで使う TE / VAE を決め、Forge にあるか確かめる。
- * Forge は見つからないファイル名を黙って捨て、TE が無いまま読み込もうとして分かりにくい落ち方をするので、先に止める
- */
-async function resolveModules(checkpoint: string): Promise<string[]> {
-  if (!checkpointPaths.has(checkpoint)) await fetchModels();
-  const file = checkpointPaths.get(checkpoint);
-  // 知らない名前だと Forge は黙っていま読み込んでいるモデルで生成するので、ここで止める
-  if (!file) throw new SetupError(`Checkpoint が見つかりません: ${checkpoint}`);
-  const family = familyOf(sidecars.get(file).base);
-  const modules = prefs.modulesFor(checkpoint, family);
-  const label = family ?? "このモデル";
-  if (!modules.length) {
-    if (archNeedsModules.has(archOf(family) ?? "")) throw new SetupError(`${label} は Text Encoder と VAE を別に指定しないと使えません。Extras の「モデルの設定」で選んでください`);
-    return [];
-  }
-  const have = new Set((await forge.modules()).map((m) => m.model_name));
-  const missing = modules.filter((m) => !have.has(m));
-  if (missing.length)
-    throw new SetupError(
-      `${label} に使う Text Encoder / VAE が Forge にありません: ${missing.join(", ")}。` +
-        "models/text_encoder か models/VAE に置いて Forge を再起動するか (Forge は起動したときにしか一覧を読みません)、Extras の「モデルの設定」で選び直してください",
-    );
-  return modules;
-}
-
-/** 高速化 / DMD2 / PAG / APG を使えるか確かめる。Forge は知らないスクリプト名を渡すとエラーにし、知らない LoRA は黙って無視するので、先に止めて分かる言葉にする */
-async function checkSpeed(p: GenerateParams) {
-  const dmd2 = p.dmd2 !== "off";
-  if (!p.fast && !dmd2 && !p.pag && !p.apg) return;
-  const file = checkpointPaths.get(p.checkpoint);
-  const family = file ? familyOf(sidecars.get(file).base) : null;
-  const what = [dmd2 && "DMD2", p.fast && "高速化", p.pag && "PAG", p.apg && "APG"].filter(Boolean).join(" / ");
-  if (archOf(family) !== "sdxl") throw new SetupError(`${what} は SDXL 系のモデル (Illustrious / NoobAI / Pony / SDXL) でしか使えません`);
-  if (dmd2) {
-    if (!(await forge.loras()).some((l) => l.name === cfg.dmd2Lora))
-      throw new SetupError(`DMD2 の LoRA (${cfg.dmd2Lora}) が Forge にありません。models/Lora に置いて LoRA の一覧を再読込してください (別の名前なら config.json の dmd2Lora)`);
-    return;
-  }
-  const { txt2img } = await forge.scripts();
-  const need = [p.fast && ["高速化", SPECTRUM_SCRIPT, "ruiz-spectrum"], (p.pag || p.apg) && ["PAG / APG", GUIDANCE_SCRIPT, "ruiz-guidance"]].filter((x): x is string[] => !!x);
-  for (const [label, script, dir] of need)
-    if (!txt2img.includes(script.toLowerCase()))
-      throw new SetupError(`${label}に使う Forge の拡張 (${script}) がありません。forge-extensions/${dir} を Forge の extensions につないで、Forge を再起動してください`);
-}
+// 生成の前の確認 (server/precheck.ts)。Forge は知らない Checkpoint / TE / VAE / LoRA を黙って捨てるので、先に止めて分かる言葉にする
+const precheckDeps: PrecheckDeps = {
+  async checkpointFile(title) {
+    if (!checkpointPaths.has(title)) await fetchModels();
+    return checkpointPaths.get(title) ?? null;
+  },
+  baseOf: (file) => sidecars.get(file).base,
+  modulesFor: (checkpoint, family) => prefs.modulesFor(checkpoint, family),
+  forge,
+  dmd2Lora: cfg.dmd2Lora,
+};
 
 server.post<{ Body: GenerateParams }>("/api/generate", { schema: generateSchema }, async (req) => {
-  const modules = await resolveModules(req.body.checkpoint);
-  await checkSpeed(req.body);
+  const modules = await precheck(req.body, precheckDeps);
   const job = jobs.start(req.body, modules);
   prefs.recordGenerate(req.body);
   return { id: job.id };
