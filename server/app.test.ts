@@ -235,6 +235,16 @@ describe("ワイルドカード", () => {
     expect((await post("/api/wildcards/delete", { name: "palette/color" })).json()).toEqual({ ok: true });
     expect((await get("/api/wildcards")).json()).toEqual({ wildcards: [] });
   });
+
+  it("展開プレビュー: 編集中の内容から引き、ほかのファイルへの参照を展開する", async () => {
+    const r = await post("/api/wildcards/preview", { name: "outfit", text: "# comment\n__color__ dress\n\n", count: 3 });
+    expect(r.statusCode).toBe(200);
+    expect(r.json().entries).toBe(1);
+    expect(r.json().samples).toEqual([expect.stringMatching(/^(red|blue) dress$/)]);
+    expect((await post("/api/wildcards/preview", { name: null, text: "" })).json()).toEqual({ samples: [], entries: 0 });
+    expect((await post("/api/wildcards/preview", { text: "a" })).statusCode).toBe(400);
+    expect((await post("/api/wildcards/preview", { name: null, text: "a", count: 0 })).statusCode).toBe(400);
+  });
 });
 
 describe("設定", () => {

@@ -128,3 +128,145 @@ export class Wildcards {
     return { ok: true };
   }
 }
+
+// ---- 展開プレビュー ----
+
+/** コメント (# で始まる行) と空行を除いた候補。前後の空白は落とす */
+export function wildcardEntries(text: string): string[] {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"));
+}
+
+export interface PreviewOptions {
+  /** 引く件数 */
+  count?: number;
+  /** ほかのファイルへの参照 (__name__) を何段まで展開するか */
+  depth?: number;
+  /** 乱数 (テストで固定するため) */
+  random?: () => number;
+}
+
+/** __name__ (Dynamic Prompts のワイルドカード参照。* と ** のグロブも) */
+const refRe = /__([\w\-/*.!]+?)__/g;
+/** 入れ子の無い {a|b|c} (${var} の { は除く) */
+const variantRe = /(?<!\$)\{([^{}]*)\}/;
+
+/** "chara/*" → chara/ の直下、"chara/**" → chara/ 以下すべて */
+function globToRegExp(glob: string) {
+  const re = glob
+    .split("**")
+    .map((part) => part.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("[^/]*"))
+    .join(".*");
+  return new RegExp(`^${re}$`, "i");
+}
+
+/** {2$$a|b|c} や {1-2$$ and $$a|b} の中身を 1 つ (か数個) 選ぶ */
+function pickVariant(body: string, random: () => number) {
+  let min = 1;
+  let max = 1;
+  let sep = ", ";
+  let rest = body;
+  const m = /^(\d+)?(?:-(\d+))?\$\$(?:([^$|]*)\$\$)?/.exec(body);
+  if (m) {
+    // "2$$" は 2 個、"1-3$$" は 1〜3 個、"$$" だけなら 1 個 (区切りだけ変えるとき)
+    min = m[1] !== undefined ? Number(m[1]) : 1;
+    max = m[2] !== undefined ? Number(m[2]) : min;
+    if (m[3] !== undefined) sep = m[3];
+    rest = body.slice(m[0].length);
+  }
+  const options = rest.split("|").map((o) => {
+    // "3::option" は重み付き
+    const w = /^\s*(\d+(?:\.\d+)?)::/.exec(o);
+    return { text: (w ? o.slice(w[0].length) : o).trim(), weight: w ? Number(w[1]) : 1 };
+  });
+  const n = Math.min(options.length, max > min ? min + Math.floor(random() * (max - min + 1)) : min);
+  const picked: string[] = [];
+  const pool = [...options];
+  for (let i = 0; i < n && pool.length; i++) {
+    const total = pool.reduce((s, o) => s + o.weight, 0);
+    let r = random() * total;
+    let idx = pool.findIndex((o) => (r -= o.weight) < 0);
+    if (idx < 0) idx = pool.length - 1;
+    picked.push(pool.splice(idx, 1)[0].text);
+  }
+  return picked.join(sep);
+}
+
+/** ランダムに n 件 (重複なし)。候補が足りなければ全部 */
+function sample<T>(items: T[], n: number, random: () => number) {
+  const pool = [...items];
+  const out: T[] = [];
+  while (out.length < n && pool.length) out.push(pool.splice(Math.floor(random() * pool.length), 1)[0]);
+  return out;
+}
+
+export class WildcardPreview {
+  constructor(private readonly wildcards: Wildcards) {}
+
+  /**
+   * 編集中の内容 (保存前のバッファ) からランダムに数件引いて展開する。
+   * name は編集中のファイルの名前 (新規なら null)。自分自身への参照は編集中の内容から引く。
+   * ほかのファイルへの参照は depth 段まで展開し、無いファイルや深すぎるものはそのまま残す
+   */
+  async preview(text: string, name: string | null, opts: PreviewOptions = {}) {
+    const { count = 4, depth = 3, random = Math.random } = opts;
+    const entries = wildcardEntries(text);
+    const self = name ? this.normalize(name) : null;
+    const files = new Map<string, Promise<string[] | null>>();
+    const entriesOf = (ref: string): Promise<string[] | null> => {
+      const n = this.normalize(ref);
+      if (n === self) return Promise.resolve(entries);
+      let p = files.get(n);
+      if (!p) files.set(n, (p = this.load(n)));
+      return p;
+    };
+    const expand = async (line: string, left: number): Promise<string> => {
+      let out = line;
+      // 入れ子の {a|{b|c}} は内側から
+      for (let i = 0; i < 50; i++) {
+        const m = variantRe.exec(out);
+        if (!m) break;
+        out = out.slice(0, m.index) + pickVariant(m[1], random) + out.slice(m.index + m[0].length);
+      }
+      if (left <= 0) return out;
+      const parts: (string | Promise<string>)[] = [];
+      let at = 0;
+      for (const m of out.matchAll(refRe)) {
+        parts.push(out.slice(at, m.index));
+        at = m.index + m[0].length;
+        parts.push(
+          entriesOf(m[1]).then((list) => {
+            if (!list?.length) return m[0];
+            return expand(list[Math.floor(random() * list.length)], left - 1);
+          }),
+        );
+      }
+      parts.push(out.slice(at));
+      return (await Promise.all(parts)).join("");
+    };
+    const picked = sample(entries, Math.max(0, count), random);
+    return { samples: await Promise.all(picked.map((l) => expand(l, depth))), entries: entries.length };
+  }
+
+  private normalize(name: string) {
+    return name.trim().replace(/\\/g, "/").replace(/\.txt$/i, "").toLowerCase();
+  }
+
+  /** 参照先のファイルの候補。グロブならあてはまるファイルを全部。無ければ null */
+  private async load(name: string): Promise<string[] | null> {
+    try {
+      if (name.includes("*")) {
+        const re = globToRegExp(name);
+        const hits = (await this.wildcards.list()).filter((f) => re.test(f.name));
+        const texts = await Promise.all(hits.map((f) => this.wildcards.read(f.name)));
+        return texts.flatMap((t) => wildcardEntries(t.text));
+      }
+      return wildcardEntries((await this.wildcards.read(name)).text);
+    } catch (e) {
+      if (e instanceof WildcardError) return null;
+      throw e;
+    }
+  }
+}

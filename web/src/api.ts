@@ -39,6 +39,12 @@ export interface Diagnosis {
   warnings: Finding[];
 }
 
+export interface WildcardPreview {
+  samples: string[];
+  /** コメントと空行を除いた候補の数 */
+  entries: number;
+}
+
 export interface WildcardFile {
   name: string;
   entries: number;
@@ -357,6 +363,9 @@ export const api = {
     request<{ name: string; mtime: number; entries: number }>("/api/wildcards/file", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, text, mtime }) }),
   renameWildcard: (from: string, to: string) => post<{ name: string }>("/api/wildcards/rename", { from, to }),
   deleteWildcard: (name: string) => post<{ ok: boolean }>("/api/wildcards/delete", { name }),
+  /** 編集中の内容 (保存前) からランダムに数件引いて展開する。name は編集中のファイル (新規なら null) */
+  previewWildcard: (name: string | null, text: string, signal?: AbortSignal) =>
+    request<WildcardPreview>("/api/wildcards/preview", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name, text }), signal }),
 };
 
 /** "sd\\anime\\foo_v2.safetensors" → "foo_v2" */

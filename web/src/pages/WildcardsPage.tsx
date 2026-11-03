@@ -1,7 +1,7 @@
-import { faArrowLeft, faChevronRight, faEllipsis, faMagnifyingGlass, faPlus } from "@fortawesome/free-solid-svg-icons";
+import { faArrowLeft, faChevronRight, faDice, faEllipsis, faMagnifyingGlass, faPlus } from "@fortawesome/free-solid-svg-icons";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
 import { type MouseEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { api, type WildcardFile } from "../api";
+import { api, type WildcardFile, type WildcardPreview } from "../api";
 import { Heading } from "../components/Heading";
 import { usePersistentState } from "../hooks";
 import { MenuItem, PopMenu } from "../components/PopMenu";
@@ -155,6 +155,7 @@ export function WildcardsPage() {
         )}
         {message && <p className={`mb-2 text-xs break-words ${message.error ? "text-danger" : "text-accent"}`}>{message.text}</p>}
         <PromptEditor key={open.name + (open.mtime === null ? ":new" : "")} value={open.text} onChange={(text) => setOpen((o) => o && { ...o, text })} lineNumbers minHeight="60vh" placeholder="1 行に 1 つ候補を書く" />
+        <ExpansionPreview name={open.mtime === null ? null : open.name} text={open.text} />
       </div>
     );
 
@@ -207,5 +208,63 @@ export function WildcardsPage() {
         })}
       </div>
     </div>
+  );
+}
+
+/**
+ * 展開プレビュー: 編集中の内容 (保存前) からランダムに数件引いて出す。
+ * 書き換えて少し待つと引き直し、🎲 ですぐ振り直す。引くのはサーバー側 (ほかのファイルへの参照 __名前__ を展開するため)
+ */
+function ExpansionPreview({ name, text }: { name: string | null; text: string }) {
+  const [preview, setPreview] = useState<WildcardPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  // 振り直しのたびに増やして、効果を起こし直す
+  const [roll, setRoll] = useState(0);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => {
+      api.previewWildcard(name, text, ctrl.signal).then(
+        (r) => {
+          setPreview(r);
+          setError(null);
+        },
+        (e) => {
+          if (!ctrl.signal.aborted) setError((e as Error).message);
+        },
+      );
+    }, 400);
+    return () => {
+      clearTimeout(timer);
+      ctrl.abort();
+    };
+  }, [name, text, roll]);
+
+  return (
+    <section className="mt-4">
+      <Heading
+        info={"編集中の内容 (保存する前のもの) からランダムに数件引いたもの。\nほかのワイルドカードへの参照 (__名前__) は 3 段まで、{a|b} は 1 つ選んで展開します。見つからない参照はそのまま出ます。"}
+        aside={
+          <button onClick={() => setRoll((n) => n + 1)} className="flex items-center gap-1.5 rounded-lg border border-accent px-3 py-1 text-xs text-accent">
+            <FontAwesomeIcon icon={faDice} />
+            振り直す
+          </button>
+        }
+      >
+        展開プレビュー
+        {preview && <span className="ml-2 font-normal text-muted">{preview.entries} 件から</span>}
+      </Heading>
+      {error && <p className="mb-2 text-xs break-words text-danger">{error}</p>}
+      {preview && !preview.samples.length && <p className="text-sm text-muted">候補がありません (# で始まる行と空行は候補になりません)</p>}
+      {preview && preview.samples.length > 0 && (
+        <ul className="overflow-hidden rounded-xl border border-line bg-surface">
+          {preview.samples.map((s, i) => (
+            <li key={i} className="border-b border-line px-3 py-2 font-mono text-sm break-words whitespace-pre-wrap last:border-b-0">
+              {s}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

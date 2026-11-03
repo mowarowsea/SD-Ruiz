@@ -21,7 +21,7 @@ import { moveModelToTrash, SidecarCache, thumbnail } from "./library.js";
 import { type ModelParams, PrefsStore } from "./prefs.js";
 import { RecommendStore, sampleImagePath } from "./recommend.js";
 import { APG_CFG, dmd2Presets, GUIDANCE_SCRIPT, SPECTRUM_SCRIPT } from "./speed.js";
-import { Wildcards } from "./wildcards.js";
+import { WildcardPreview, Wildcards } from "./wildcards.js";
 
 /** ルートが使う部品。テストでは中身を差し替える */
 export interface AppDeps {
@@ -249,6 +249,22 @@ export async function createApp(cfg: Config, deps: AppDeps, opts: AppOptions = {
     "/api/wildcards/delete",
     { schema: { body: { type: "object", required: ["name"], properties: { name: { type: "string" } } } } },
     async (req) => wildcards.remove(req.body.name),
+  );
+
+  // 展開プレビュー: 編集中の内容 (保存前) からランダムに数件引いて、__参照__ と {a|b} を展開して返す
+  const preview = new WildcardPreview(wildcards);
+  server.post<{ Body: { name: string | null; text: string; count?: number } }>(
+    "/api/wildcards/preview",
+    {
+      schema: {
+        body: {
+          type: "object",
+          required: ["name", "text"],
+          properties: { name: { type: ["string", "null"] }, text: { type: "string" }, count: { type: "integer", minimum: 1, maximum: 10, default: 4 } },
+        },
+      },
+    },
+    async (req) => preview.preview(req.body.text, req.body.name, { count: req.body.count }),
   );
 
   server.get("/api/loras", async () => {

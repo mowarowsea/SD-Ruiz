@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, utimesSync, writeFile
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { tempDir } from "./testing/tmp.js";
-import { WildcardError, Wildcards } from "./wildcards.js";
+import { wildcardEntries, WildcardError, WildcardPreview, Wildcards } from "./wildcards.js";
 
 let tmp: ReturnType<typeof tempDir>;
 let root: string;
@@ -19,6 +19,12 @@ beforeEach(() => {
 afterEach(() => tmp.remove());
 
 const wc = () => new Wildcards(root, async () => trash);
+
+describe("wildcardEntries", () => {
+  it("コメントと空行を除き、前後の空白を落とす", () => {
+    expect(wildcardEntries("# c\nred\n\n  green  \r\n#x\n")).toEqual(["red", "green"]);
+  });
+});
 
 describe("Wildcards", () => {
   describe("list", () => {
@@ -124,5 +130,83 @@ describe("Wildcards", () => {
       expect(existsSync(join(root, "solo"))).toBe(false);
       expect(existsSync(root)).toBe(true);
     });
+  });
+});
+
+describe("WildcardPreview", () => {
+  /** 決まった順に返す乱数 (0 以上 1 未満) */
+  const seq = (...values: number[]) => {
+    let i = 0;
+    return () => values[i++ % values.length];
+  };
+  const preview = (text: string, name: string | null = null, opts = {}) => new WildcardPreview(wc()).preview(text, name, { random: seq(0), ...opts });
+
+  it("編集中の内容からコメントと空行を除いて引く。候補が足りなければ全部", async () => {
+    const r = await preview("# c\na\n\nb\n", null, { count: 5 });
+    expect(r.entries).toBe(2);
+    expect(r.samples.sort()).toEqual(["a", "b"]);
+    expect((await preview("", null)).samples).toEqual([]);
+  });
+
+  it("count 件を重複なく引く", async () => {
+    const r = await preview("a\nb\nc\nd", null, { count: 3, random: Math.random });
+    expect(r.samples).toHaveLength(3);
+    expect(new Set(r.samples).size).toBe(3);
+  });
+
+  it("ほかのファイルへの参照 __name__ は、そのファイル (保存済み) の候補から引く", async () => {
+    const r = await preview("__color__ dress", null, { count: 1 });
+    expect(r.samples).toEqual(["red dress"]);
+    const r2 = await preview("__chara/fate__", null, { count: 1, random: seq(0, 0.99) });
+    expect(r2.samples).toEqual(["rin"]);
+  });
+
+  it("自分自身への参照は編集中の (保存前の) 内容から引く", async () => {
+    const r = await preview("__color__ and __color__\npurple", "color", { count: 1, random: seq(0, 0.99, 0.99) });
+    expect(r.samples).toEqual(["purple and purple"]);
+  });
+
+  it("無いファイル・使えない名前の参照はそのまま残す", async () => {
+    const r = await preview("__nope__ __../x__ __a:b__", null, { count: 1 });
+    expect(r.samples).toEqual(["__nope__ __../x__ __a:b__"]);
+  });
+
+  it("参照は depth 段まで展開し、それより深いものはそのまま", async () => {
+    writeFileSync(join(root, "outfit.txt"), "__color__ shirt\n");
+    expect((await preview("__outfit__", null, { count: 1, depth: 2 })).samples).toEqual(["red shirt"]);
+    expect((await preview("__outfit__", null, { count: 1, depth: 1 })).samples).toEqual(["__color__ shirt"]);
+    expect((await preview("__outfit__", null, { count: 1, depth: 0 })).samples).toEqual(["__outfit__"]);
+  });
+
+  it("グロブ (chara/* や **) はあてはまるファイルの候補をまとめて引く", async () => {
+    writeFileSync(join(root, "chara", "touhou.txt"), "reimu\n");
+    mkdirSync(join(root, "chara", "sub"));
+    writeFileSync(join(root, "chara", "sub", "deep.txt"), "deep\n");
+    const r = await preview("__chara/*__", null, { count: 1, random: seq(0, 0.99) });
+    expect(r.samples).toEqual(["reimu"]);
+    // ** は chara/fate, chara/sub/deep, chara/touhou の順にまとめる
+    const r2 = await preview("__chara/**__", null, { count: 1, random: seq(0, 0.6) });
+    expect(r2.samples).toEqual(["deep"]);
+    expect((await preview("__zzz/*__", null, { count: 1 })).samples).toEqual(["__zzz/*__"]);
+  });
+
+  it("{a|b|c} は 1 つ選ぶ (入れ子は内側から、${var} の { は触らない)", async () => {
+    expect((await preview("{red|blue} {hat|{cap|cape}}", null, { count: 1, random: seq(0, 0, 0.99, 0.99) })).samples).toEqual(["red cape"]);
+    expect((await preview("${x=1} ${x}", null, { count: 1 })).samples).toEqual(["${x=1} ${x}"]);
+  });
+
+  it("{2$$a|b|c} は 2 つ、{1-2$$ and $$a|b} は区切りを変え、3::a は重み", async () => {
+    expect((await preview("{2$$a|b|c}", null, { count: 1, random: seq(0) })).samples).toEqual(["a, b"]);
+    expect((await preview("{2$$ and $$a|b|c}", null, { count: 1, random: seq(0, 0.99, 0) })).samples).toEqual(["c and a"]);
+    expect((await preview("{1-2$$a|b}", null, { count: 1, random: seq(0, 0.99, 0, 0) })).samples).toEqual(["a, b"]);
+    // 重み 3 の a は 0〜0.75、b は 0.75〜1
+    expect((await preview("{3::a|b}", null, { count: 1, random: seq(0, 0.7) })).samples).toEqual(["a"]);
+    expect((await preview("{3::a|b}", null, { count: 1, random: seq(0, 0.8) })).samples).toEqual(["b"]);
+  });
+
+  it("参照の先の {a|b} も、{a|__color__} の中の参照も展開する", async () => {
+    writeFileSync(join(root, "outfit.txt"), "{maid|nurse} outfit\n");
+    expect((await preview("__outfit__", null, { count: 1 })).samples).toEqual(["maid outfit"]);
+    expect((await preview("{__color__|x}", null, { count: 1 })).samples).toEqual(["red"]);
   });
 });
