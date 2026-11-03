@@ -22,11 +22,15 @@ export interface Prefs {
   baseSettings: Record<string, Partial<BaseSettings>>;
 }
 
-const path = fileURLToPath(new URL("../data/prefs.json", import.meta.url));
+export const defaultPrefsPath = fileURLToPath(new URL("../data/prefs.json", import.meta.url));
 const empty: Prefs = { favoriteCheckpoints: [], favoriteLoras: [], recentCheckpoints: [], modelParams: {}, modelModules: {}, baseSettings: {} };
 
 export class PrefsStore {
-  private prefs: Prefs = existsSync(path) ? { ...empty, ...JSON.parse(readFileSync(path, "utf8")) } : structuredClone(empty);
+  private prefs: Prefs;
+
+  constructor(private readonly path = defaultPrefsPath) {
+    this.prefs = existsSync(path) ? { ...empty, ...JSON.parse(readFileSync(path, "utf8")) } : structuredClone(empty);
+  }
 
   get value() {
     return this.prefs;
@@ -45,8 +49,8 @@ export class PrefsStore {
   }
 
   private save() {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, JSON.stringify(this.prefs, null, 2));
+    mkdirSync(dirname(this.path), { recursive: true });
+    writeFileSync(this.path, JSON.stringify(this.prefs, null, 2));
   }
 
   setFavorite(kind: "checkpoint" | "lora", id: string, on: boolean) {

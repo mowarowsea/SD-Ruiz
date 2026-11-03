@@ -49,9 +49,9 @@ export interface Job {
 export class JobBusyError extends Error {}
 
 // 最後に成功したジョブは data/last/ に保存し、サーバーを再起動しても復元する
-const lastDir = fileURLToPath(new URL("../data/last", import.meta.url));
+export const defaultLastDir = fileURLToPath(new URL("../data/last", import.meta.url));
 
-function saveLast(job: Job) {
+function saveLast(lastDir: string, job: Job) {
   rmSync(lastDir, { recursive: true, force: true });
   mkdirSync(lastDir, { recursive: true });
   job.images.forEach((img, i) => writeFileSync(`${lastDir}/${i}.png`, img));
@@ -59,7 +59,7 @@ function saveLast(job: Job) {
   writeFileSync(`${lastDir}/job.json`, JSON.stringify(meta, null, 2));
 }
 
-function loadLast(): Job | null {
+function loadLast(lastDir: string): Job | null {
   try {
     if (!existsSync(`${lastDir}/job.json`)) return null;
     const meta = JSON.parse(readFileSync(`${lastDir}/job.json`, "utf8")) as Omit<Job, "images">;
@@ -74,12 +74,16 @@ function loadLast(): Job | null {
 export class JobManager {
   private job: Job | null = null;
   /** 最後に画像ができたジョブ (中断でも 1 枚以上できていれば成功扱い) */
-  private lastSuccess: Job | null = loadLast();
+  private lastSuccess: Job | null;
 
   constructor(
     private readonly forge: ForgeClient,
     private readonly dmd2Lora: string,
-  ) {}
+    /** 最後に成功したジョブを置くフォルダ */
+    private readonly lastDir = defaultLastDir,
+  ) {
+    this.lastSuccess = loadLast(lastDir);
+  }
 
   get current() {
     return this.job;
@@ -149,7 +153,7 @@ export class JobManager {
       if (job.images.length) {
         job.finishedAt = Date.now();
         this.lastSuccess = job;
-        saveLast(job);
+        saveLast(this.lastDir, job);
       }
     } catch (e) {
       job.status = "error";

@@ -53,11 +53,12 @@ const defaults: Config = {
 
 // config.json (git 管理外) があれば defaults を上書きする
 // 環境変数 SD_RUIZ_PORT があればポートだけ差し替える (本番を動かしたまま別ポートで試すとき用)
-export function loadConfig(): Config {
-  const path = fileURLToPath(new URL("../config.json", import.meta.url));
+export const defaultConfigPath = fileURLToPath(new URL("../config.json", import.meta.url));
+
+export function loadConfig(path = defaultConfigPath, env: NodeJS.ProcessEnv = process.env): Config {
   const user = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Partial<Config>) : {};
   const cfg = { ...defaults, ...user, forgeUrl: (user.forgeUrl ?? defaults.forgeUrl).replace(/\/+$/, "") };
-  cfg.groqApiKey ??= process.env.GROQ_API_KEY || null;
-  if (process.env.SD_RUIZ_PORT) cfg.port = Number(process.env.SD_RUIZ_PORT);
+  cfg.groqApiKey ??= env.GROQ_API_KEY || null;
+  if (env.SD_RUIZ_PORT) cfg.port = Number(env.SD_RUIZ_PORT);
   return cfg;
 }

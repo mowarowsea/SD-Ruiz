@@ -12,4 +12,4 @@ Stable Diffusion WebUI Forge Neo を生成エンジンとして使う、スマ�
 2. `config.example.json` を `config.json` にコピーし、`forgeDir` に Forge Neo のインストール先を書く
 3. `start.bat` で起動 (初回は依存のインストールとビルドを行う)。`http://<ホスト>:3940/` を開く
 
-開発時は `npm run dev` (Vite dev server: 5940)。
+開発時は `npm run dev` (Vite dev server: 5940)。テストは `npm test` (vitest。Forge は無くても動く)。

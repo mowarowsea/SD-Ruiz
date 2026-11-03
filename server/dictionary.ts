@@ -52,7 +52,7 @@ function parseTranslationCsv(text: string, map = new Map<string, string>()) {
   return map;
 }
 
-const userPath = fileURLToPath(new URL("../data/translations.csv", import.meta.url));
+export const defaultUserTranslationPath = fileURLToPath(new URL("../data/translations.csv", import.meta.url));
 const hasJapanese = (s: string) => /[^\x00-\x7f]/.test(s);
 
 export class TagDictionary {
@@ -64,7 +64,13 @@ export class TagDictionary {
   /** 自分で直した訳。base より優先する */
   private user = new Map<string, string>();
 
-  constructor(tagsDir: string | null, tagFile: string, translationFiles: string | string[] | null) {
+  constructor(
+    tagsDir: string | null,
+    tagFile: string,
+    translationFiles: string | string[] | null,
+    /** 自分で直した訳の保存先 */
+    private readonly userPath = defaultUserTranslationPath,
+  ) {
     if (existsSync(userPath)) this.user = parseTranslationCsv(readFileSync(userPath, "utf8"));
     if (!tagsDir) return;
     const tagPath = join(tagsDir, tagFile);
@@ -176,9 +182,9 @@ export class TagDictionary {
     const tr = text.replace(/[\r\n]+/g, " ").trim();
     if (tr) this.user.set(name, tr);
     else this.user.delete(name);
-    mkdirSync(dirname(userPath), { recursive: true });
+    mkdirSync(dirname(this.userPath), { recursive: true });
     const lines = [...this.user].sort(([a], [b]) => a.localeCompare(b)).map(([n, t]) => `${n},${t}`);
-    writeFileSync(userPath, lines.join("\n") + (lines.length ? "\n" : ""));
+    writeFileSync(this.userPath, lines.join("\n") + (lines.length ? "\n" : ""));
     return this.lookup([name])[0];
   }
 }
